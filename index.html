@@ -636,6 +636,7 @@
           id: panelEl.dataset.panelId,
           kind: 'note',
           title: panelEl.querySelector('.panel-title').textContent,
+          col: storedCol(panelEl),
           note: panelEl.querySelector('.note-body').value,
         };
       }
@@ -647,6 +648,7 @@
         id: panelEl.dataset.panelId,
         kind: 'tasks',
         title: panelEl.querySelector('.panel-title').textContent,
+        col: storedCol(panelEl),
         tasks,
       };
     }
@@ -776,6 +778,7 @@
       panel.dataset.panelId = panelData.id;
       const kind = panelData.kind === 'note' ? 'note' : 'tasks';
       panel.dataset.kind = kind;
+      if (Number.isFinite(panelData.col)) panel.dataset.col = String(panelData.col);
       if (kind === 'note') panel.classList.add('note-panel');
 
       const head = document.createElement('header');
@@ -813,16 +816,21 @@
       if (noteResizeObserver) noteResizeObserver.disconnect();
       for (const el of panelList.querySelectorAll(':scope > .panel')) el.remove();
       for (const panel of panels) panelList.appendChild(makePanel(panel));
+      // 旧数据没有列号时，补一次自动落位
+      for (const el of panelList.querySelectorAll(':scope > .panel:not([data-col])')) {
+        placePanel(el);
+      }
       layoutPanels();
     }
 
-    // ---------- 瀑布流布局：按顺序放入当前最短的一列 ----------
+    // ---------- 布局：面板按列摆放，列内按 DOM 顺序堆叠 ----------
     const COLUMN_BREAKPOINTS = [
       { min: 1180, columns: 4 },
       { min: 860, columns: 3 },
       { min: 560, columns: 2 },
       { min: 0, columns: 1 },
     ];
+    const PANEL_GAP = 16;
 
     let layoutQueued = false;
 
@@ -834,6 +842,20 @@
       return 1;
     }
 
+    // 窗口变窄时列数会减少，超出范围的列号只在显示时折回，不改动保存的位置
+    function storedCol(el) {
+      const col = Number(el.dataset.col);
+      return Number.isFinite(col) ? col : 0;
+    }
+
+    function effectiveCol(el) {
+      return clampCol(storedCol(el), columnCount());
+    }
+
+    function clampCol(col, columns) {
+      return Math.min(Math.max(col, 0), columns - 1);
+    }
+
     function layoutPanels() {
       const panelEls = [...panelList.querySelectorAll(':scope > .panel')];
       if (!panelEls.length) {
@@ -841,31 +863,39 @@
         return;
       }
 
-      const gap = 16;
       const columns = columnCount();
       const total = panelList.clientWidth;
-      const colWidth = (total - gap * (columns - 1)) / columns;
+      const colWidth = (total - PANEL_GAP * (columns - 1)) / columns;
       const heights = new Array(columns).fill(0);
 
       for (const el of panelEls) {
         el.style.position = 'absolute';
         el.style.width = colWidth + 'px';
-        el.style.left = '';
-        el.style.top = '';
       }
 
       for (const el of panelEls) {
-        const h = el.offsetHeight;
-        let col = 0;
-        for (let i = 1; i < columns; i += 1) {
-          if (heights[i] < heights[col]) col = i;
-        }
-        el.style.left = (col * (colWidth + gap)) + 'px';
+        const col = effectiveCol(el);
+        el.style.left = (col * (colWidth + PANEL_GAP)) + 'px';
         el.style.top = heights[col] + 'px';
-        heights[col] += h + gap;
+        heights[col] += el.offsetHeight + PANEL_GAP;
       }
 
-      panelList.style.height = (Math.max(...heights) - gap) + 'px';
+      panelList.style.height = (Math.max(...heights) - PANEL_GAP) + 'px';
+    }
+
+    // 新面板放进当前最矮的一列末尾，已有面板位置不受影响
+    function placePanel(panelEl) {
+      const columns = columnCount();
+      const heights = new Array(columns).fill(0);
+      for (const el of panelList.querySelectorAll(':scope > .panel')) {
+        if (el === panelEl || !el.dataset.col) continue;
+        heights[effectiveCol(el)] += el.offsetHeight + PANEL_GAP;
+      }
+      let target = 0;
+      for (let i = 1; i < columns; i += 1) {
+        if (heights[i] < heights[target]) target = i;
+      }
+      panelEl.dataset.col = String(target);
     }
 
     function scheduleLayout() {
@@ -1211,12 +1241,14 @@
     // ---------- 添加面板 ----------
     addTaskPanelBtn.addEventListener('click', () => {
       const before = serialize();
-      panelList.appendChild(makePanel({
+      const panel = makePanel({
         id: uid(),
         kind: 'tasks',
         title: nextPanelTitle('面板'),
         tasks: [],
-      }));
+      });
+      panelList.appendChild(panel);
+      placePanel(panel);
       layoutPanels();
       persist();
       pushUndo(before);
@@ -1231,6 +1263,7 @@
         note: '',
       });
       panelList.appendChild(panel);
+      placePanel(panel);
       layoutPanels();
       persist();
       pushUndo(before);
@@ -1304,18 +1337,16 @@
       }
 
       if (dragKind === 'panel') {
-        const targetPanel = nearestPanel(e.clientX, e.clientY);
-        if (!targetPanel || targetPanel === dragPanelEl) {
+        const drop = resolvePanelDrop(e.clientX, e.clientY);
+        if (!drop) {
           pendingPanelDrop = null;
           hideDropLine();
           return;
         }
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
-        const rect = targetPanel.getBoundingClientRect();
-        const after = e.clientX > rect.left + rect.width / 2;
-        pendingPanelDrop = { target: targetPanel, after };
-        showPanelLine(targetPanel, after);
+        pendingPanelDrop = drop;
+        showPanelLine(drop);
       }
     });
 
@@ -1337,11 +1368,17 @@
         if (after) container.insertBefore(dragTaskEl, after);
         else container.appendChild(dragTaskEl);
       } else if (dragKind === 'panel' && pendingPanelDrop) {
-        const { target, after } = pendingPanelDrop;
-        panelList.insertBefore(dragPanelEl, after ? target.nextSibling : target);
+        applyPanelDrop(pendingPanelDrop);
         layoutPanels();
       }
     });
+
+    // 把面板挪到目标列：同一列内按上下关系重排，跨列时插到该列对应位置
+    function applyPanelDrop({ col, before }) {
+      dragPanelEl.dataset.col = String(col);
+      if (before) panelList.insertBefore(dragPanelEl, before);
+      else panelList.appendChild(dragPanelEl);
+    }
 
     boardEl.addEventListener('dragend', () => {
       hideDropLine();
@@ -1386,7 +1423,7 @@
         const last = siblings[siblings.length - 1];
         top = last ? last.getBoundingClientRect().bottom + 1 : rect.top + 6;
       }
-      dropLine.className = 'drop-line horizontal';
+      dropLine.className = 'drop-line';
       dropLine.style.left = (rect.left + 4) + 'px';
       dropLine.style.top = top + 'px';
       dropLine.style.width = Math.max(rect.width - 8, 40) + 'px';
@@ -1394,32 +1431,56 @@
       dropLine.hidden = false;
     }
 
-    function showPanelLine(target, after) {
-      const rect = target.getBoundingClientRect();
+    function showPanelLine({ col, before }) {
+      const geo = columnGeometry();
+      const colLeft = geo.left + col * (geo.colWidth + PANEL_GAP);
+      let top;
+      if (before) {
+        top = before.getBoundingClientRect().top - 5;
+      } else {
+        const inCol = panelsInColumn(col);
+        const last = inCol[inCol.length - 1];
+        top = last
+          ? last.getBoundingClientRect().bottom + PANEL_GAP - 5
+          : panelList.getBoundingClientRect().top + 4;
+      }
       dropLine.className = 'drop-line';
-      dropLine.style.left = (after ? rect.right + 6 : rect.left - 8) + 'px';
-      dropLine.style.top = rect.top + 'px';
-      dropLine.style.width = '2px';
-      dropLine.style.height = rect.height + 'px';
+      dropLine.style.left = colLeft + 'px';
+      dropLine.style.top = top + 'px';
+      dropLine.style.width = geo.colWidth + 'px';
+      dropLine.style.height = '2px';
       dropLine.hidden = false;
     }
 
-    // 面板是绝对定位的瀑布流，命中判断按几何距离，不依赖 DOM 层叠
-    function nearestPanel(x, y) {
-      let best = null;
-      let bestDist = Infinity;
-      for (const el of panelList.querySelectorAll(':scope > .panel')) {
-        if (el === dragPanelEl) continue;
+    function columnGeometry() {
+      const columns = columnCount();
+      return {
+        columns,
+        left: panelList.getBoundingClientRect().left,
+        colWidth: (panelList.clientWidth - PANEL_GAP * (columns - 1)) / columns,
+      };
+    }
+
+    function panelsInColumn(col) {
+      return [...panelList.querySelectorAll(':scope > .panel')]
+        .filter((el) => el !== dragPanelEl && effectiveCol(el) === col);
+    }
+
+    // 横向决定落在哪一列（允许整列留空），纵向决定插到列内哪个面板之前
+    function resolvePanelDrop(x, y) {
+      const geo = columnGeometry();
+      const step = geo.colWidth + PANEL_GAP;
+      const col = clampCol(Math.floor((x - geo.left + PANEL_GAP / 2) / step), geo.columns);
+
+      let before = null;
+      for (const el of panelsInColumn(col)) {
         const rect = el.getBoundingClientRect();
-        const dx = Math.max(rect.left - x, 0, x - rect.right);
-        const dy = Math.max(rect.top - y, 0, y - rect.bottom);
-        const dist = dx * dx + dy * dy;
-        if (dist < bestDist) {
-          bestDist = dist;
-          best = el;
+        if (y < rect.top + rect.height / 2) {
+          before = el;
+          break;
         }
       }
-      return best;
+      return { col, before };
     }
 
     function hideDropLine() {
