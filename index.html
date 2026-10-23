@@ -355,23 +355,19 @@
   }
 
   .task-content[data-empty="1"] {
-    display: flex;
+    display: none;
     align-items: center;
-    visibility: hidden;
     min-height: 34px;
     margin: 4px -4px 0;
     padding: 5px 6px;
     border-radius: 6px;
     font-size: 12px;
-    opacity: 0;
+    opacity: .65;
     cursor: text;
     transition: background .12s;
   }
 
-  .row:hover .task-content[data-empty="1"] {
-    visibility: visible;
-    opacity: .65;
-  }
+  .row:hover .task-content[data-empty="1"] { display: flex; }
 
   .task-content[data-empty="1"]:hover {
     background: var(--panel-hover);
