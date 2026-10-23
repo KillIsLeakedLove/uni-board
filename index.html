@@ -355,9 +355,21 @@
   }
 
   .task-content[data-empty="1"] {
-    display: block;
+    display: flex;
+    align-items: center;
+    min-height: 34px;
+    margin: 4px -4px 0;
+    padding: 5px 6px;
+    border-radius: 6px;
     font-size: 12px;
-    opacity: .6;
+    opacity: .65;
+    cursor: text;
+    transition: background .12s, opacity .12s;
+  }
+
+  .task-content[data-empty="1"]:hover {
+    background: var(--panel-hover);
+    opacity: .9;
   }
 
   .task-content[data-empty="1"]::before { content: "点击添加内容"; }
