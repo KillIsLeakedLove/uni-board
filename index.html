@@ -1,0 +1,1384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>任务清单</title>
+<script>
+  try {
+    const saved = localStorage.getItem('task-board.theme');
+    document.documentElement.dataset.theme =
+      saved === 'dark' || saved === 'light'
+        ? saved
+        : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  } catch (err) {}
+</script>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f3f4f7;
+    --panel: #ffffff;
+    --panel-hover: #f7f8fa;
+    --text: #1f2328;
+    --muted: #8a909c;
+    --border: #e5e8ee;
+    --input-border: #c9cfd9;
+    --accent: #4f6ef7;
+    --accent-hover: #415cdc;
+    --accent-soft: #eef2ff;
+    --danger: #e5484d;
+    --danger-soft: #fdeeee;
+    --drop-line: #e5484d;
+    --shadow: 0 1px 2px rgba(16, 24, 40, .06);
+    --focus-ring: rgba(93, 114, 246, .15);
+    --pill-todo-bg: #eceff3;
+    --pill-todo-text: #667085;
+    --pill-doing-bg: #fdf0dc;
+    --pill-doing-text: #a96400;
+    --pill-done-bg: #e3f5ea;
+    --pill-done-text: #1f7a44;
+    --done-text: #8b929e;
+  }
+
+  html[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #121418;
+    --panel: #1b1e24;
+    --panel-hover: #23262e;
+    --text: #e5e7eb;
+    --muted: #8b93a1;
+    --border: #2b303a;
+    --input-border: #3a4150;
+    --accent: #5b78ff;
+    --accent-hover: #4a66e6;
+    --accent-soft: #232a44;
+    --danger: #ff6b70;
+    --danger-soft: #3a2024;
+    --drop-line: #ff6b70;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .35);
+    --focus-ring: rgba(91, 120, 255, .25);
+    --pill-todo-bg: #2a2f39;
+    --pill-todo-text: #aab2c0;
+    --pill-doing-bg: #3a2d18;
+    --pill-doing-text: #eab45f;
+    --pill-done-bg: #173a28;
+    --pill-done-text: #5fd190;
+    --done-text: #7c8492;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    transition: background .15s, color .15s;
+  }
+
+  .topbar {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 28px 20px 18px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .topbar-text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .topbar h1 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 650;
+    letter-spacing: .5px;
+  }
+
+  .topbar-actions {
+    display: flex;
+    gap: 8px;
+    padding-top: 2px;
+  }
+
+  .ghost-btn {
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .12s, border-color .12s;
+  }
+
+  .ghost-btn:hover { background: var(--panel-hover); }
+
+  .ghost-btn:disabled {
+    opacity: .45;
+    cursor: default;
+  }
+
+  .app {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 0 20px 40px;
+  }
+
+  .board {
+    padding-bottom: 16px;
+  }
+
+  .panel-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
+    gap: 16px;
+    align-items: start;
+  }
+
+  .panel {
+    background: var(--panel);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    padding: 14px 16px 16px;
+    display: flex;
+    flex-direction: column;
+    min-height: 160px;
+  }
+
+  .panel.dragging { opacity: .45; }
+
+  .panel-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 2px 8px;
+    cursor: grab;
+    user-select: none;
+  }
+
+  .panel-grip {
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1;
+    letter-spacing: -1px;
+  }
+
+  .panel-title {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .panel-title[contenteditable="true"] {
+    user-select: text;
+    cursor: text;
+    outline: none;
+    background: var(--accent-soft);
+    border-radius: 4px;
+    padding: 0 4px;
+    margin: 0 -4px;
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+
+  .panel-actions {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+  }
+
+  .panel-add,
+  .panel-del {
+    width: 28px;
+    height: 28px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+  }
+
+  .panel-add:hover {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .panel-del:hover {
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
+
+  .add-panel {
+    width: 100%;
+    height: 140px;
+    border: 1.5px dashed var(--input-border);
+    border-radius: 14px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    transition: border-color .12s, color .12s, background .12s;
+  }
+
+  .add-panel:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .task-tree {
+    list-style: none;
+    margin: 0;
+    padding: 0 2px;
+    flex: 1;
+    min-height: 80px;
+  }
+
+  .task-tree:empty::after {
+    content: "点右上角 ＋ 添加任务";
+    display: grid;
+    place-items: center;
+    min-height: 80px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .task + .task { margin-top: 2px; }
+
+  .row {
+    display: flex;
+    align-items: flex-start;
+    gap: 5px;
+    padding: 7px 8px;
+    border-radius: 6px;
+    cursor: grab;
+    user-select: none;
+  }
+
+  .row:hover { background: var(--panel-hover); }
+  .task.dragging > .row { opacity: .35; cursor: grabbing; }
+
+  .collapse-btn {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+  }
+
+  .collapse-btn:hover:not(:disabled) {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .collapse-btn::before {
+    content: "▸";
+    display: block;
+    font-size: 14px;
+    transition: transform .12s;
+  }
+
+  .task:not(.collapsed) > .row > .collapse-btn::before {
+    transform: rotate(90deg);
+  }
+
+  .collapse-btn:disabled { visibility: hidden; }
+
+  .task.collapsed > .children { display: none; }
+
+  .status-pill {
+    flex-shrink: 0;
+    min-width: 62px;
+    border: 0;
+    border-radius: 999px;
+    padding: 2px 8px;
+    margin-top: 1px;
+    font-size: 12px;
+    line-height: 1.6;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .status-pill[data-status="todo"] { background: var(--pill-todo-bg); color: var(--pill-todo-text); }
+  .status-pill[data-status="doing"] { background: var(--pill-doing-bg); color: var(--pill-doing-text); }
+  .status-pill[data-status="done"] { background: var(--pill-done-bg); color: var(--pill-done-text); }
+  .status-pill:hover { filter: brightness(.95); }
+
+  .main {
+    flex: 1;
+    min-width: 0;
+    padding-top: 3px;
+  }
+
+  .task-title {
+    display: block;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+
+  .task[data-status="done"] > .row .task-title {
+    color: var(--done-text);
+    text-decoration: line-through;
+  }
+
+  .task-content {
+    display: block;
+    margin-top: 2px;
+    font-size: 13px;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+
+  .task-content[data-empty="1"] {
+    display: block;
+    font-size: 12px;
+    opacity: .6;
+  }
+
+  .task-content[data-empty="1"]::before { content: "点击添加内容"; }
+
+  .task-title[contenteditable="true"] {
+    user-select: text;
+    cursor: text;
+    outline: none;
+    background: var(--accent-soft);
+    border-radius: 4px;
+    padding: 0 4px;
+    margin: 0 -4px;
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+
+  .content-editor {
+    display: block;
+    width: 100%;
+    margin: 4px 0 1px;
+    padding: 6px 8px;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    background: var(--panel);
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+    line-height: 1.5;
+    resize: vertical;
+    outline: none;
+    box-shadow: 0 0 0 3px var(--focus-ring);
+  }
+
+  .row-actions {
+    display: flex;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity .12s;
+  }
+
+  .row:hover .row-actions,
+  .row:focus-within .row-actions { opacity: 1; }
+
+  .add-sub,
+  .del {
+    width: 24px;
+    height: 24px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+  }
+
+  .add-sub:hover {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .del:hover {
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
+
+  .children {
+    list-style: none;
+    margin: 0 0 0 16px;
+    padding-left: 10px;
+    border-left: 1.5px solid var(--border);
+  }
+
+  .children:empty { display: none; }
+
+  .composer-row { padding: 4px 8px 6px; }
+
+  .composer {
+    width: 100%;
+    padding: 8px 11px;
+    border: 1px solid var(--input-border);
+    border-radius: 8px;
+    background: var(--panel);
+    font: inherit;
+    color: var(--text);
+    outline: none;
+  }
+
+  .composer::placeholder { color: var(--muted); }
+
+  .composer:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--focus-ring);
+  }
+
+  .drop-line {
+    position: fixed;
+    z-index: 30;
+    background: var(--drop-line);
+    border-radius: 2px;
+    pointer-events: none;
+  }
+
+  .drop-line { height: 2px; }
+
+  @media (max-width: 560px) {
+    .topbar { flex-wrap: wrap; }
+    .topbar-actions { padding-top: 0; }
+    .panel-list { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-text">
+      <h1>任务清单</h1>
+    </div>
+    <div class="topbar-actions">
+      <button id="undo-btn" class="ghost-btn" type="button" disabled title="撤销上一步（最多 5 步）">撤销</button>
+      <button id="import-btn" class="ghost-btn" type="button" title="从 Markdown 文件导入">导入 MD</button>
+      <button id="export-btn" class="ghost-btn" type="button" title="导出为 Markdown 文件">导出 MD</button>
+      <button id="theme-btn" class="ghost-btn" type="button">黑暗模式</button>
+    </div>
+  </header>
+
+  <main class="app">
+    <div class="board" id="board">
+      <div class="panel-list" id="panel-list">
+        <button class="add-panel" id="add-panel" type="button">＋ 新建面板</button>
+      </div>
+    </div>
+  </main>
+
+  <div class="drop-line" id="drop-line" hidden></div>
+  <input id="import-file" type="file" accept=".md,.markdown,text/markdown,text/plain" hidden>
+
+  <script>
+    const STORAGE_KEY = 'task-board.v5';
+    const THEME_KEY = 'task-board.theme';
+    const STATUS_LABEL = { todo: '未开始', doing: '执行中', done: '已完成' };
+    const STATUS_NEXT = { todo: 'doing', doing: 'done', done: 'todo' };
+    const MAX_SUB_LEVELS = 5;
+    const MAX_UNDO = 5;
+
+    const boardEl = document.getElementById('board');
+    const panelList = document.getElementById('panel-list');
+    const addPanelBtn = document.getElementById('add-panel');
+    const dropLine = document.getElementById('drop-line');
+    const undoBtn = document.getElementById('undo-btn');
+    const importBtn = document.getElementById('import-btn');
+    const exportBtn = document.getElementById('export-btn');
+    const importFile = document.getElementById('import-file');
+    const themeBtn = document.getElementById('theme-btn');
+
+    const undoStack = [];
+
+    function uid() {
+      return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    }
+
+    function seedPanels() {
+      return [
+        {
+          id: uid(),
+          title: '工作',
+          tasks: [{
+            id: uid(),
+            title: '整理本周工作',
+            content: '周五前完成，包含数据汇总和风险项',
+            status: 'doing',
+            collapsed: false,
+            children: [
+              { id: uid(), title: '收集各组进度', content: '', status: 'done', collapsed: false, children: [] },
+              { id: uid(), title: '汇总风险项', content: '重点关注延期项', status: 'todo', collapsed: false, children: [
+                { id: uid(), title: '标注高优风险', content: '', status: 'todo', collapsed: false, children: [] },
+              ] },
+            ],
+          }],
+        },
+        {
+          id: uid(),
+          title: '生活',
+          tasks: [
+            { id: uid(), title: '预约体检', content: '空腹，早上 8:30', status: 'todo', collapsed: false, children: [] },
+            { id: uid(), title: '买跑鞋', content: '', status: 'done', collapsed: false, children: [] },
+          ],
+        },
+      ];
+    }
+
+    function loadPanels() {
+      let saved = null;
+      try {
+        saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      } catch (err) {
+        saved = null;
+      }
+      if (!saved || !Array.isArray(saved.panels)) return seedPanels();
+      return saved.panels;
+    }
+
+    function readTask(li) {
+      const children = [];
+      for (const child of li.querySelectorAll(':scope > .children > .task')) {
+        children.push(readTask(child));
+      }
+      return {
+        id: li.dataset.id,
+        title: li.querySelector(':scope > .row > .main > .task-title').textContent,
+        content: li.querySelector(':scope > .row > .main > .task-content').textContent,
+        status: li.dataset.status,
+        collapsed: li.dataset.collapsed === '1',
+        children,
+      };
+    }
+
+    function readPanel(panelEl) {
+      const tasks = [];
+      for (const li of panelEl.querySelectorAll(':scope > .task-tree > .task')) {
+        tasks.push(readTask(li));
+      }
+      return {
+        id: panelEl.dataset.panelId,
+        title: panelEl.querySelector('.panel-title').textContent,
+        tasks,
+      };
+    }
+
+    function serialize() {
+      const panels = [];
+      for (const panelEl of panelList.querySelectorAll(':scope > .panel')) {
+        panels.push(readPanel(panelEl));
+      }
+      return JSON.stringify({ panels });
+    }
+
+    function persist() {
+      localStorage.setItem(STORAGE_KEY, serialize());
+    }
+
+    function updateUndoBtn() {
+      undoBtn.disabled = undoStack.length === 0;
+    }
+
+    function pushUndo(snapshot) {
+      undoStack.push(snapshot);
+      if (undoStack.length > MAX_UNDO) undoStack.shift();
+      updateUndoBtn();
+    }
+
+    function undo() {
+      const snapshot = undoStack.pop();
+      if (!snapshot) return;
+      renderPanels(JSON.parse(snapshot).panels);
+      persist();
+      updateUndoBtn();
+    }
+
+    // ---------- 构建 DOM ----------
+    function makeTask(task, depth) {
+      const li = document.createElement('li');
+      li.className = 'task';
+      li.dataset.id = task.id;
+      li.dataset.status = task.status;
+      li.dataset.depth = depth;
+      li.dataset.collapsed = task.collapsed ? '1' : '0';
+      if (task.collapsed) li.classList.add('collapsed');
+      li.draggable = true;
+
+      const row = document.createElement('div');
+      row.className = 'row';
+
+      const collapseBtn = document.createElement('button');
+      collapseBtn.type = 'button';
+      collapseBtn.className = 'collapse-btn';
+      collapseBtn.title = '展开/折叠子任务';
+
+      const pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = 'status-pill';
+      pill.title = '点击切换状态';
+
+      const main = document.createElement('div');
+      main.className = 'main';
+
+      const title = document.createElement('span');
+      title.className = 'task-title';
+      title.textContent = task.title;
+
+      const content = document.createElement('span');
+      content.className = 'task-content';
+      content.textContent = task.content || '';
+      if (!task.content) content.dataset.empty = '1';
+
+      main.append(title, content);
+
+      const actions = document.createElement('div');
+      actions.className = 'row-actions';
+
+      if (depth < MAX_SUB_LEVELS) {
+        const addSub = document.createElement('button');
+        addSub.type = 'button';
+        addSub.className = 'add-sub';
+        addSub.title = '添加子任务';
+        addSub.textContent = '＋';
+        actions.appendChild(addSub);
+      }
+
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'del';
+      del.title = '删除任务';
+      del.textContent = '×';
+      actions.appendChild(del);
+
+      row.append(collapseBtn, pill, main, actions);
+
+      const children = document.createElement('ul');
+      children.className = 'children';
+      for (const child of task.children || []) {
+        children.appendChild(makeTask(child, depth + 1));
+      }
+
+      li.append(row, children);
+      paintPill(li);
+      refreshCollapse(li);
+      return li;
+    }
+
+    function paintPill(li) {
+      const pill = li.querySelector(':scope > .row > .status-pill');
+      const status = li.dataset.status;
+      pill.dataset.status = status;
+      pill.textContent = STATUS_LABEL[status];
+    }
+
+    function refreshCollapse(li) {
+      const btn = li.querySelector(':scope > .row > .collapse-btn');
+      const hasChildren = !!li.querySelector(':scope > .children > .task');
+      btn.disabled = !hasChildren;
+      const collapsed = hasChildren && li.dataset.collapsed === '1';
+      li.classList.toggle('collapsed', collapsed);
+      btn.setAttribute('aria-expanded', String(hasChildren && !collapsed));
+    }
+
+    function makePanel(panelData) {
+      const panel = document.createElement('section');
+      panel.className = 'panel';
+      panel.draggable = true;
+      panel.dataset.panelId = panelData.id;
+
+      const head = document.createElement('header');
+      head.className = 'panel-head';
+      head.innerHTML =
+        '<span class="panel-grip" aria-hidden="true">⋮⋮</span>' +
+        '<h2 class="panel-title" title="点击重命名"></h2>' +
+        '<div class="panel-actions">' +
+          '<button class="panel-add" type="button" title="添加任务">＋</button>' +
+          '<button class="panel-del" type="button" title="删除面板">×</button>' +
+        '</div>';
+      head.querySelector('.panel-title').textContent = panelData.title;
+
+      const tree = document.createElement('ul');
+      tree.className = 'task-tree';
+      for (const task of panelData.tasks || []) {
+        tree.appendChild(makeTask(task, 0));
+      }
+
+      panel.append(head, tree);
+      return panel;
+    }
+
+    function renderPanels(panels) {
+      for (const el of panelList.querySelectorAll(':scope > .panel')) el.remove();
+      for (const panel of panels) {
+        panelList.insertBefore(makePanel(panel), addPanelBtn);
+      }
+    }
+
+    // ---------- 点击操作 ----------
+    boardEl.addEventListener('click', (e) => {
+      const panelDel = e.target.closest('.panel-del');
+      if (panelDel) {
+        const before = serialize();
+        panelDel.closest('.panel').remove();
+        persist();
+        pushUndo(before);
+        return;
+      }
+
+      const panelAdd = e.target.closest('.panel-add');
+      if (panelAdd) {
+        const panel = panelAdd.closest('.panel');
+        openComposer(panel.querySelector(':scope > .task-tree'), 0, null);
+        return;
+      }
+
+      const collapseBtn = e.target.closest('.collapse-btn');
+      if (collapseBtn) {
+        const li = collapseBtn.closest('.task');
+        if (collapseBtn.disabled) return;
+        const before = serialize();
+        li.dataset.collapsed = li.dataset.collapsed === '1' ? '0' : '1';
+        refreshCollapse(li);
+        persist();
+        pushUndo(before);
+        return;
+      }
+
+      const pill = e.target.closest('.status-pill');
+      if (pill) {
+        const li = pill.closest('.task');
+        const before = serialize();
+        li.dataset.status = STATUS_NEXT[li.dataset.status];
+        paintPill(li);
+        persist();
+        pushUndo(before);
+        return;
+      }
+
+      const addSub = e.target.closest('.add-sub');
+      if (addSub) {
+        const li = addSub.closest('.task');
+        openComposer(
+          li.querySelector(':scope > .children'),
+          Number(li.dataset.depth) + 1,
+          li
+        );
+        return;
+      }
+
+      const del = e.target.closest('.del');
+      if (del) {
+        const li = del.closest('.task');
+        const before = serialize();
+        const parentLi = li.parentElement.closest('.task');
+        li.remove();
+        if (parentLi) refreshCollapse(parentLi);
+        persist();
+        pushUndo(before);
+        return;
+      }
+
+      // 拖拽刚结束时出现的 click 不触发编辑
+      if (Date.now() < editSuppressUntil) return;
+
+      const panelTitle = e.target.closest('.panel-title');
+      if (panelTitle && !panelTitle.isContentEditable) {
+        editPanelTitle(panelTitle);
+        return;
+      }
+
+      const contentEl = e.target.closest('.task-content');
+      if (contentEl && !contentEl.isContentEditable) {
+        editContent(contentEl);
+        return;
+      }
+
+      const titleEl = e.target.closest('.task-title');
+      if (titleEl && !titleEl.isContentEditable) editTitle(titleEl);
+    });
+
+    // ---------- 单击编辑 ----------
+
+    function editPanelTitle(textEl) {
+      const original = textEl.textContent;
+      const before = serialize();
+      textEl.contentEditable = 'true';
+      textEl.spellcheck = false;
+      textEl.focus();
+
+      const range = document.createRange();
+      range.selectNodeContents(textEl);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+
+      const finish = (save) => {
+        textEl.removeEventListener('keydown', onKey);
+        textEl.removeEventListener('blur', onBlur);
+        textEl.contentEditable = 'false';
+
+        let next = save ? textEl.textContent.trim() : original;
+        if (!next) next = original;
+        textEl.textContent = next;
+
+        if (next !== original) {
+          persist();
+          pushUndo(before);
+        }
+      };
+
+      const onKey = (ev) => {
+        if (ev.isComposing || ev.keyCode === 229) return;
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          finish(true);
+        } else if (ev.key === 'Escape') {
+          ev.preventDefault();
+          finish(false);
+        }
+      };
+
+      const onBlur = () => finish(true);
+
+      textEl.addEventListener('keydown', onKey);
+      textEl.addEventListener('blur', onBlur);
+    }
+
+    function editTitle(textEl) {
+      const original = textEl.textContent;
+      const before = serialize();
+      textEl.contentEditable = 'true';
+      textEl.spellcheck = false;
+      textEl.focus();
+
+      const range = document.createRange();
+      range.selectNodeContents(textEl);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+
+      const finish = (save) => {
+        textEl.removeEventListener('keydown', onKey);
+        textEl.removeEventListener('blur', onBlur);
+        textEl.contentEditable = 'false';
+
+        let next = save ? textEl.textContent.trim() : original;
+        if (!next) next = original;
+        textEl.textContent = next;
+
+        if (next !== original) {
+          persist();
+          pushUndo(before);
+        }
+      };
+
+      const onKey = (ev) => {
+        if (ev.isComposing || ev.keyCode === 229) return;
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          finish(true);
+        } else if (ev.key === 'Escape') {
+          ev.preventDefault();
+          finish(false);
+        }
+      };
+
+      const onBlur = () => finish(true);
+
+      textEl.addEventListener('keydown', onKey);
+      textEl.addEventListener('blur', onBlur);
+    }
+
+    function editContent(contentEl) {
+      const original = contentEl.textContent;
+      const before = serialize();
+      const wasEmpty = contentEl.dataset.empty === '1';
+
+      delete contentEl.dataset.empty;
+      contentEl.style.display = 'none';
+
+      const textarea = document.createElement('textarea');
+      textarea.className = 'content-editor';
+      textarea.rows = 3;
+      textarea.value = original;
+      textarea.placeholder = '输入任务内容';
+      contentEl.after(textarea);
+      textarea.focus();
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+      let closed = false;
+      const finish = (save) => {
+        if (closed) return;
+        closed = true;
+        const next = save ? textarea.value.trim() : original;
+        textarea.remove();
+        contentEl.style.display = '';
+        contentEl.textContent = next;
+
+        if (next) delete contentEl.dataset.empty;
+        else contentEl.dataset.empty = '1';
+
+        if (next !== original || (!next && !wasEmpty)) {
+          persist();
+          pushUndo(before);
+        }
+      };
+
+      textarea.addEventListener('blur', () => finish(true));
+      textarea.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          finish(false);
+        } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          finish(true);
+        }
+      });
+    }
+
+    // ---------- 添加任务 ----------
+    function openComposer(container, depth, parentLi) {
+      const existing = container.querySelector(':scope > .composer-row');
+      if (existing) {
+        existing.querySelector('input').focus();
+        return;
+      }
+
+      const row = document.createElement('li');
+      row.className = 'composer-row';
+
+      const input = document.createElement('input');
+      input.className = 'composer';
+      input.type = 'text';
+      input.placeholder = depth === 0 ? '输入任务标题，回车添加' : '输入子任务标题，回车添加';
+      input.autocomplete = 'off';
+
+      row.appendChild(input);
+      container.appendChild(row);
+      input.focus();
+
+      const before = serialize();
+      let closed = false;
+      const close = (save) => {
+        if (closed) return;
+        closed = true;
+        const title = input.value.trim();
+        row.remove();
+        if (save && title) {
+          if (parentLi) {
+            parentLi.dataset.collapsed = '0';
+            refreshCollapse(parentLi);
+          }
+          container.appendChild(makeTask({
+            id: uid(),
+            title,
+            content: '',
+            status: 'todo',
+            collapsed: false,
+            children: [],
+          }, depth));
+          persist();
+          pushUndo(before);
+        }
+      };
+
+      input.addEventListener('keydown', (e) => {
+        if (e.isComposing || e.keyCode === 229) return;
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          close(true);
+        } else if (e.key === 'Escape') {
+          close(false);
+        }
+      });
+      input.addEventListener('blur', () => close(true));
+    }
+
+    // ---------- 添加面板 ----------
+    addPanelBtn.addEventListener('click', () => {
+      const before = serialize();
+      panelList.insertBefore(makePanel({
+        id: uid(),
+        title: nextPanelTitle(),
+        tasks: [],
+      }), addPanelBtn);
+      persist();
+      pushUndo(before);
+    });
+
+    function nextPanelTitle() {
+      let max = 0;
+      for (const el of panelList.querySelectorAll('.panel-title')) {
+        const match = /^面板 (\d+)$/.exec(el.textContent);
+        if (match) max = Math.max(max, Number(match[1]));
+      }
+      return '面板 ' + (max + 1);
+    }
+
+    // ---------- 拖拽排序（任务同级 / 面板同级） ----------
+    let dragKind = null;
+    let dragTaskEl = null;
+    let dragPanelEl = null;
+    let dragSnapshot = null;
+    let editSuppressUntil = 0;
+    let pendingTaskDrop = null;
+    let pendingPanelDrop = null;
+    let panelDragArmed = false;
+    let dragBlocked = false;
+
+    boardEl.addEventListener('pointerdown', (e) => {
+      dragBlocked = !!e.target.closest('button, input, textarea, [contenteditable="true"]');
+      panelDragArmed = !!e.target.closest('.panel-head') && !dragBlocked;
+    });
+
+    boardEl.addEventListener('dragstart', (e) => {
+      const taskEl = e.target.closest('.task');
+      const panelEl = e.target.closest('.panel');
+      const snapshot = serialize();
+
+      if (taskEl && !dragBlocked) {
+        dragKind = 'task';
+        dragTaskEl = taskEl;
+        dragSnapshot = snapshot;
+        taskEl.classList.add('dragging');
+      } else if (panelEl && panelDragArmed && !dragBlocked) {
+        dragKind = 'panel';
+        dragPanelEl = panelEl;
+        dragSnapshot = snapshot;
+        panelEl.classList.add('dragging');
+      } else {
+        e.preventDefault();
+        return;
+      }
+
+      editSuppressUntil = Date.now() + 300;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', '');
+    });
+
+    boardEl.addEventListener('dragover', (e) => {
+      if (dragKind === 'task') {
+        const container = dragTaskEl.parentElement;
+        if (!container.contains(e.target) || dragTaskEl.contains(e.target)) {
+          pendingTaskDrop = null;
+          hideDropLine();
+          return;
+        }
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const after = getTaskAfter(container, e.clientY);
+        pendingTaskDrop = { container, after };
+        showTaskLine(container, after);
+        return;
+      }
+
+      if (dragKind === 'panel') {
+        const targetPanel = e.target.closest('.panel');
+        if (!targetPanel || targetPanel === dragPanelEl) {
+          pendingPanelDrop = null;
+          hideDropLine();
+          return;
+        }
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const rect = targetPanel.getBoundingClientRect();
+        const after = e.clientY > rect.top + rect.height / 2;
+        pendingPanelDrop = { target: targetPanel, after };
+        showPanelLine(targetPanel, after);
+      }
+    });
+
+    boardEl.addEventListener('dragleave', (e) => {
+      if (!dragKind) return;
+      if (!boardEl.contains(e.relatedTarget)) {
+        pendingTaskDrop = null;
+        pendingPanelDrop = null;
+        hideDropLine();
+      }
+    });
+
+    boardEl.addEventListener('drop', (e) => {
+      if (!dragKind) return;
+      e.preventDefault();
+
+      if (dragKind === 'task' && pendingTaskDrop) {
+        const { container, after } = pendingTaskDrop;
+        if (after) container.insertBefore(dragTaskEl, after);
+        else container.appendChild(dragTaskEl);
+      } else if (dragKind === 'panel' && pendingPanelDrop) {
+        const { target, after } = pendingPanelDrop;
+        panelList.insertBefore(dragPanelEl, after ? target.nextSibling : target);
+      }
+    });
+
+    boardEl.addEventListener('dragend', () => {
+      hideDropLine();
+      if (dragTaskEl) dragTaskEl.classList.remove('dragging');
+      if (dragPanelEl) dragPanelEl.classList.remove('dragging');
+
+      if (dragKind && dragSnapshot && serialize() !== dragSnapshot) {
+        persist();
+        pushUndo(dragSnapshot);
+      }
+
+      dragKind = null;
+      dragTaskEl = null;
+      dragPanelEl = null;
+      dragSnapshot = null;
+      pendingTaskDrop = null;
+      pendingPanelDrop = null;
+    });
+
+    function getTaskAfter(container, y) {
+      let closest = null;
+      let closestOffset = Number.NEGATIVE_INFINITY;
+      for (const li of container.querySelectorAll(':scope > .task:not(.dragging)')) {
+        const row = li.querySelector(':scope > .row');
+        const rect = row.getBoundingClientRect();
+        const offset = y - rect.top - rect.height / 2;
+        if (offset < 0 && offset > closestOffset) {
+          closestOffset = offset;
+          closest = li;
+        }
+      }
+      return closest;
+    }
+
+    function showTaskLine(container, after) {
+      const rect = container.getBoundingClientRect();
+      let top;
+      if (after) {
+        top = after.querySelector(':scope > .row').getBoundingClientRect().top - 2;
+      } else {
+        const siblings = [...container.querySelectorAll(':scope > .task:not(.dragging)')];
+        const last = siblings[siblings.length - 1];
+        top = last ? last.getBoundingClientRect().bottom + 1 : rect.top + 6;
+      }
+      dropLine.className = 'drop-line horizontal';
+      dropLine.style.left = (rect.left + 4) + 'px';
+      dropLine.style.top = top + 'px';
+      dropLine.style.width = Math.max(rect.width - 8, 40) + 'px';
+      dropLine.style.height = '';
+      dropLine.hidden = false;
+    }
+
+    function showPanelLine(target, after) {
+      const rect = target.getBoundingClientRect();
+      dropLine.className = 'drop-line';
+      dropLine.style.left = (rect.left + 4) + 'px';
+      dropLine.style.top = (after ? rect.bottom - 2 : rect.top - 2) + 'px';
+      dropLine.style.width = Math.max(rect.width - 8, 40) + 'px';
+      dropLine.style.height = '';
+      dropLine.hidden = false;
+    }
+
+    function hideDropLine() {
+      dropLine.hidden = true;
+    }
+
+    // ---------- Markdown 导入 / 导出 ----------
+    function toMarkdown(panels) {
+      const lines = [
+        '# 任务清单',
+        '',
+        '<!-- 状态：[ ] 未开始 · [/] 执行中 · [x] 已完成 -->',
+        '',
+      ];
+
+      const walk = (tasks, depth) => {
+        for (const task of tasks) {
+          const mark = task.status === 'done' ? 'x' : task.status === 'doing' ? '/' : ' ';
+          lines.push('  '.repeat(depth) + '- [' + mark + '] ' + task.title);
+          if (task.content) {
+            const quoteIndent = '  '.repeat(depth + 1);
+            for (const line of task.content.split('\n')) {
+              lines.push(quoteIndent + '> ' + line);
+            }
+          }
+          if (task.children && task.children.length) walk(task.children, depth + 1);
+        }
+      };
+
+      for (const panel of panels) {
+        lines.push('## ' + panel.title, '');
+        walk(panel.tasks || [], 0);
+        lines.push('');
+      }
+
+      return lines.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+    }
+
+    function parseMarkdown(text) {
+      const panels = [];
+      const stack = [];
+      let currentPanel = null;
+      let currentTask = null;
+      let fallbackSeq = 0;
+
+      const ensurePanel = () => {
+        if (!currentPanel) {
+          fallbackSeq += 1;
+          currentPanel = {
+            id: uid(),
+            title: fallbackSeq === 1 ? '导入' : '导入 ' + fallbackSeq,
+            tasks: [],
+          };
+          panels.push(currentPanel);
+        }
+        return currentPanel;
+      };
+
+      for (const raw of text.split(/\r?\n/)) {
+        const heading = /^\s*#{2,6}\s+(.+?)\s*$/.exec(raw);
+        if (heading) {
+          currentPanel = { id: uid(), title: heading[1], tasks: [] };
+          panels.push(currentPanel);
+          stack.length = 0;
+          currentTask = null;
+          continue;
+        }
+        if (/^\s*#\s+/.test(raw)) continue;
+
+        const item = /^(\s*)[-*+]\s+\[([ xX\/])\]\s+(.+?)\s*$/.exec(raw);
+        if (item) {
+          const panel = ensurePanel();
+          const indent = item[1].replace(/\t/g, '    ').length;
+          while (stack.length && stack[stack.length - 1].indent >= indent) stack.pop();
+          while (stack.length > MAX_SUB_LEVELS) stack.pop();
+
+          const parent = stack.length ? stack[stack.length - 1].task : null;
+          const mark = item[2];
+          const status = mark === '/'
+            ? 'doing'
+            : (mark === 'x' || mark === 'X' ? 'done' : 'todo');
+          const task = {
+            id: uid(),
+            title: item[3],
+            content: '',
+            status,
+            collapsed: false,
+            children: [],
+          };
+
+          if (parent) parent.children.push(task);
+          else panel.tasks.push(task);
+
+          currentTask = task;
+          stack.push({ indent, task });
+          continue;
+        }
+
+        const quote = /^\s*>\s?(.*)$/.exec(raw);
+        if (quote && currentTask) {
+          currentTask.content = currentTask.content
+            ? currentTask.content + '\n' + quote[1]
+            : quote[1];
+        }
+      }
+
+      const trimTask = (task) => {
+        task.content = task.content.trim();
+        task.children.forEach(trimTask);
+      };
+      for (const panel of panels) panel.tasks.forEach(trimTask);
+
+      return panels;
+    }
+
+    importBtn.addEventListener('click', () => importFile.click());
+
+    importFile.addEventListener('change', async () => {
+      const file = importFile.files[0];
+      importFile.value = '';
+      if (!file) return;
+
+      let text;
+      try {
+        text = await file.text();
+      } catch (err) {
+        alert('读取文件失败');
+        return;
+      }
+
+      const panels = parseMarkdown(text);
+      if (!panels.some((panel) => panel.tasks.length)) {
+        alert('文件中没有找到可导入的任务');
+        return;
+      }
+      if (!window.confirm('导入将覆盖当前任务清单，是否继续？')) return;
+
+      const before = serialize();
+      renderPanels(panels);
+      persist();
+      pushUndo(before);
+    });
+
+    exportBtn.addEventListener('click', () => {
+      const panels = JSON.parse(serialize()).panels;
+      const markdown = toMarkdown(panels);
+      const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+
+      link.href = url;
+      link.download = '任务清单-' + now.getFullYear() + pad(now.getMonth() + 1)
+        + pad(now.getDate()) + '-' + pad(now.getHours()) + pad(now.getMinutes()) + '.md';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    });
+
+    // ---------- 撤销 / 主题 ----------
+    undoBtn.addEventListener('click', undo);
+
+    function paintThemeBtn() {
+      themeBtn.textContent = document.documentElement.dataset.theme === 'dark' ? '明亮模式' : '黑暗模式';
+    }
+
+    if (!document.documentElement.dataset.theme) {
+      document.documentElement.dataset.theme =
+        window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    paintThemeBtn();
+
+    themeBtn.addEventListener('click', () => {
+      const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = next;
+      localStorage.setItem(THEME_KEY, next);
+      paintThemeBtn();
+    });
+
+    // ---------- 初始化 ----------
+    renderPanels(loadPanels());
+    persist();
+    updateUndoBtn();
+  </script>
+</body>
+</html>
