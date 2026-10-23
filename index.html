@@ -927,6 +927,21 @@
       textEl.addEventListener('blur', onBlur);
     }
 
+    const CONTENT_EDITOR_EXTRA_LINES = 2;
+
+    function fitContentEditor(textarea) {
+      const style = getComputedStyle(textarea);
+      const lineHeight = parseFloat(style.lineHeight) || 19.5;
+      const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+      // placeholder 会撑大 scrollHeight，测量时先摘掉
+      const placeholder = textarea.placeholder;
+      textarea.placeholder = '';
+      textarea.rows = 1;
+      const lines = Math.round((textarea.scrollHeight - padding) / lineHeight);
+      textarea.placeholder = placeholder;
+      textarea.rows = Math.max(1, lines) + CONTENT_EDITOR_EXTRA_LINES;
+    }
+
     function editContent(contentEl) {
       const original = contentEl.textContent;
       const before = serialize();
@@ -937,10 +952,11 @@
 
       const textarea = document.createElement('textarea');
       textarea.className = 'content-editor';
-      textarea.rows = 3;
+      textarea.rows = 1;
       textarea.value = original;
       textarea.placeholder = '输入任务内容';
       contentEl.after(textarea);
+      fitContentEditor(textarea);
       textarea.focus();
       textarea.setSelectionRange(textarea.value.length, textarea.value.length);
 
@@ -963,6 +979,7 @@
       };
 
       textarea.addEventListener('blur', () => finish(true));
+      textarea.addEventListener('input', () => fitContentEditor(textarea));
       textarea.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
           e.preventDefault();
