@@ -298,6 +298,7 @@
   .task + .task { margin-top: 2px; }
 
   .row {
+    position: relative;
     display: flex;
     align-items: flex-start;
     gap: 5px;
@@ -365,8 +366,12 @@
   .main {
     flex: 1;
     min-width: 0;
-    display: flow-root;
     padding-top: 3px;
+  }
+
+  /* 只有标题行给悬浮按钮让位，正文仍占满整行 */
+  .title-line {
+    padding-right: 52px;
   }
 
   .task-title {
@@ -439,9 +444,15 @@
     box-shadow: 0 0 0 3px var(--focus-ring);
   }
 
+  /* 悬浮在标题行右侧，不再占用正文宽度 */
   .row-actions {
+    position: absolute;
+    top: 6px;
+    right: 8px;
     display: flex;
     gap: 2px;
+    border-radius: 6px;
+    background: var(--panel-hover);
     opacity: 0;
     transition: opacity .12s;
   }
@@ -622,7 +633,7 @@
       }
       return {
         id: li.dataset.id,
-        title: li.querySelector(':scope > .row > .main > .task-title').textContent,
+        title: li.querySelector(':scope > .row > .main > .title-line > .task-title').textContent,
         content: li.querySelector(':scope > .row > .main > .task-content').textContent,
         status: li.dataset.status,
         collapsed: li.dataset.collapsed === '1',
@@ -710,17 +721,21 @@
       const main = document.createElement('div');
       main.className = 'main';
 
+      const titleLine = document.createElement('div');
+      titleLine.className = 'title-line';
+
       const title = document.createElement('span');
       title.className = 'task-title';
       title.textContent = task.title;
 
-      // 角标内嵌到标题行开头，不再单独占据一列
+      titleLine.append(pill, title);
+
       const content = document.createElement('span');
       content.className = 'task-content';
       content.textContent = task.content || '';
       if (!task.content) content.dataset.empty = '1';
 
-      main.append(pill, title, content);
+      main.append(titleLine, content);
 
       const actions = document.createElement('div');
       actions.className = 'row-actions';
@@ -756,7 +771,7 @@
     }
 
     function paintPill(li) {
-      const pill = li.querySelector(':scope > .row > .main > .status-pill');
+      const pill = li.querySelector(':scope > .row > .main > .title-line > .status-pill');
       const status = li.dataset.status;
       pill.dataset.status = status;
       pill.textContent = STATUS_LABEL[status];
