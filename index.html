@@ -79,7 +79,7 @@
   }
 
   .topbar {
-    max-width: 1080px;
+    max-width: 1404px;
     margin: 0 auto;
     padding: 28px 20px 18px;
     display: flex;
@@ -126,7 +126,7 @@
   }
 
   .app {
-    max-width: 1080px;
+    max-width: 1404px;
     margin: 0 auto;
     padding: 0 20px 40px;
   }
@@ -137,7 +137,7 @@
 
   .panel-list {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(598px, 1fr));
     gap: 16px;
     align-items: start;
   }
@@ -357,14 +357,20 @@
   .task-content[data-empty="1"] {
     display: flex;
     align-items: center;
+    visibility: hidden;
     min-height: 34px;
     margin: 4px -4px 0;
     padding: 5px 6px;
     border-radius: 6px;
     font-size: 12px;
-    opacity: .65;
+    opacity: 0;
     cursor: text;
-    transition: background .12s, opacity .12s;
+    transition: background .12s;
+  }
+
+  .row:hover .task-content[data-empty="1"] {
+    visibility: visible;
+    opacity: .65;
   }
 
   .task-content[data-empty="1"]:hover {
