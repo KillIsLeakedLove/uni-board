@@ -150,22 +150,26 @@
     z-index: 1;
   }
 
-  /* 12 栏背景板：拖拽/调宽时在栏缝里显示细线，淡入淡出 */
-  .grid-guide {
+  /* 12 栏背景板：用背景渐变绘制栏缝细线，不产生任何布局节点 */
+  .panel-list::before {
+    content: "";
     position: absolute;
-    top: 0;
-    bottom: 0;
-    width: 1px;
-    background: var(--grid-line);
-    opacity: 0;
-    transition: opacity .18s ease;
+    inset: 0;
     pointer-events: none;
     z-index: 0;
+    opacity: 0;
+    transition: opacity .18s ease;
+    background-image: repeating-linear-gradient(
+      to right,
+      var(--grid-line) 0 1px,
+      transparent 1px var(--grid-step, 148px)
+    );
+    background-position-x: -8px;
     -webkit-mask-image: linear-gradient(to bottom, transparent, #000 8%, #000 92%, transparent);
     mask-image: linear-gradient(to bottom, transparent, #000 8%, #000 92%, transparent);
   }
 
-  .panel-list.grid-active .grid-guide { opacity: 1; }
+  .panel-list.grid-active::before { opacity: 1; }
 
   body.panel-resizing,
   body.panel-resizing * {
@@ -218,15 +222,16 @@
 
   .panel-resize:hover::before { background: var(--accent); }
 
-  .panel-resize-left { left: -6px; }
-  .panel-resize-right { right: -6px; }
+  /* 手柄贴在边缘内侧，避免探出面板把滚动区撑宽 */
+  .panel-resize-left { left: 0; }
+  .panel-resize-right { right: 0; }
 
   /* 便签底部调高手柄 */
   .panel-resize-bottom {
     position: absolute;
     left: 12px;
     right: 12px;
-    bottom: -5px;
+    bottom: 0;
     height: 12px;
     display: grid;
     place-items: center;
@@ -1178,35 +1183,10 @@
       });
     }
 
-    // 拖拽/调宽时显示 12 栏背景板
-    function gridGuides() {
-      let guides = panelList.querySelectorAll(':scope > .grid-guide');
-      if (guides.length !== GRID_COLS) {
-        for (const g of guides) g.remove();
-        const frag = document.createDocumentFragment();
-        for (let i = 0; i < GRID_COLS; i += 1) {
-          const g = document.createElement('div');
-          g.className = 'grid-guide';
-          g.dataset.index = String(i);
-          frag.appendChild(g);
-        }
-        panelList.appendChild(frag);
-        guides = panelList.querySelectorAll(':scope > .grid-guide');
-      }
-      const geo = gridGeometry();
-      for (const g of guides) {
-        const i = Number(g.dataset.index);
-        // 放在栏缝中线上，而不是占据整栏
-        g.style.left = (i === 0
-          ? 0
-          : i * geo.step - PANEL_GAP / 2) + 'px';
-        g.style.width = '1px';
-      }
-    }
-
+    // 拖拽/调宽时显示 12 栏背景板（纯 CSS 背景，只同步步长变量）
     function setGridActive(active) {
       if (active) {
-        gridGuides();
+        panelList.style.setProperty('--grid-step', gridGeometry().step + 'px');
         panelList.classList.add('grid-active');
       } else {
         panelList.classList.remove('grid-active');
