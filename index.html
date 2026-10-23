@@ -133,16 +133,45 @@
 
   .board {
     padding-bottom: 16px;
+    overflow-x: auto;
   }
 
   .panel-list {
     position: relative;
+    min-width: 1080px;
   }
 
   .panel-list > .panel {
     position: absolute;
     top: 0;
     left: 0;
+    z-index: 1;
+  }
+
+  /* 12 栏背景板：拖拽/调宽时提示网格粒度 */
+  .grid-guide {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: var(--accent-soft);
+    opacity: 0;
+    transition: opacity .12s;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .panel-list.grid-active .grid-guide { opacity: .5; }
+
+  body.panel-resizing,
+  body.panel-resizing * {
+    cursor: ew-resize !important;
+    user-select: none;
+  }
+
+  body.panel-resizing-y,
+  body.panel-resizing-y * {
+    cursor: ns-resize !important;
+    user-select: none;
   }
   .panel {
     background: var(--panel);
@@ -152,13 +181,86 @@
     display: flex;
     flex-direction: column;
     min-height: 160px;
+    container-type: inline-size;
+  }
+
+  /* 面板左右边缘的调宽手柄：悬停出现，不占布局 */
+  .panel-resize {
+    position: absolute;
+    top: 12px;
+    bottom: 12px;
+    width: 12px;
+    display: grid;
+    place-items: center;
+    cursor: ew-resize;
+    opacity: 0;
+    transition: opacity .12s;
+    z-index: 2;
+    touch-action: none;
+  }
+
+  .panel-resize::before {
+    content: "";
+    width: 3px;
+    height: 28px;
+    border-radius: 2px;
+    background: var(--input-border);
+    transition: background .12s;
+  }
+
+  .panel:hover > .panel-resize,
+  .panel.resizing > .panel-resize { opacity: 1; }
+
+  .panel-resize:hover::before { background: var(--accent); }
+
+  .panel-resize-left { left: -6px; }
+  .panel-resize-right { right: -6px; }
+
+  /* 便签底部调高手柄 */
+  .panel-resize-bottom {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: -5px;
+    height: 12px;
+    display: grid;
+    place-items: center;
+    cursor: ns-resize;
+    opacity: 0;
+    transition: opacity .12s;
+    z-index: 2;
+    touch-action: none;
+  }
+
+  .panel-resize-bottom::before {
+    content: "";
+    width: 36px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--input-border);
+    transition: background .12s;
+  }
+
+  .panel:hover > .panel-resize-bottom,
+  .panel.resizing-y > .panel-resize-bottom { opacity: 1; }
+
+  .panel-resize-bottom:hover::before { background: var(--accent); }
+
+  .panel.resizing-y {
+    outline: 1px solid var(--accent);
+    z-index: 3;
+  }
+
+  .panel.resizing {
+    outline: 1px solid var(--accent);
+    z-index: 3;
   }
 
   .panel.note-panel { min-height: 0; }
 
   .note-body {
     width: 100%;
-    flex: 1;
+    flex: none;
     min-height: 120px;
     margin-top: 2px;
     padding: 8px 10px;
@@ -169,7 +271,7 @@
     font: inherit;
     font-size: 13px;
     line-height: 1.6;
-    resize: vertical;
+    resize: none;
     outline: none;
   }
 
@@ -355,7 +457,34 @@
     font-size: 11px;
     line-height: 18px;
     font-family: inherit;
+    white-space: nowrap;
     cursor: pointer;
+  }
+
+  /* 极窄面板（单栏）里压缩行首留白，尽量让标题横向排开 */
+  @container (max-width: 200px) {
+    .status-pill {
+      position: relative;
+      width: 16px;
+      padding: 0;
+      margin-right: 4px;
+      font-size: 0;
+    }
+    .status-pill::after {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      font-size: 10px;
+    }
+    .status-pill[data-status="todo"]::after { content: "未"; }
+    .status-pill[data-status="doing"]::after { content: "中"; }
+    .status-pill[data-status="done"]::after { content: "完"; }
+
+    .row { padding: 6px 4px; gap: 3px; }
+    .collapse-btn { width: 14px; }
+    .task-title { word-break: keep-all; }
+    .panel-head { padding: 0 0 6px; }
   }
 
   .status-pill[data-status="todo"] { background: var(--pill-todo-bg); color: var(--pill-todo-text); }
@@ -372,6 +501,12 @@
   /* 只有标题行给悬浮按钮让位，正文仍占满整行 */
   .title-line {
     padding-right: 52px;
+  }
+
+  /* 窄面板里没有让位空间，标题用满宽度 */
+  @container (max-width: 300px) {
+    .title-line { padding-right: 0; }
+    .panel-head { padding: 0 0 6px; }
   }
 
   .task-title {
@@ -642,26 +777,25 @@
     }
 
     function readPanel(panelEl) {
+      const layout = {
+        id: panelEl.dataset.panelId,
+        title: panelEl.querySelector('.panel-title').textContent,
+        col: storedCol(panelEl),
+        span: storedSpan(panelEl),
+      };
       if (panelEl.dataset.kind === 'note') {
         return {
-          id: panelEl.dataset.panelId,
+          ...layout,
           kind: 'note',
-          title: panelEl.querySelector('.panel-title').textContent,
-          col: storedCol(panelEl),
           note: panelEl.querySelector('.note-body').value,
+          height: Number(panelEl.dataset.height) || 0,
         };
       }
       const tasks = [];
       for (const li of panelEl.querySelectorAll(':scope > .task-tree > .task')) {
         tasks.push(readTask(li));
       }
-      return {
-        id: panelEl.dataset.panelId,
-        kind: 'tasks',
-        title: panelEl.querySelector('.panel-title').textContent,
-        col: storedCol(panelEl),
-        tasks,
-      };
+      return { ...layout, kind: 'tasks', tasks };
     }
 
     function serialize() {
@@ -794,6 +928,7 @@
       const kind = panelData.kind === 'note' ? 'note' : 'tasks';
       panel.dataset.kind = kind;
       if (Number.isFinite(panelData.col)) panel.dataset.col = String(panelData.col);
+      if (Number.isFinite(panelData.span)) panel.dataset.span = String(panelData.span);
       if (kind === 'note') panel.classList.add('note-panel');
 
       const head = document.createElement('header');
@@ -807,13 +942,33 @@
         '</div>';
       head.querySelector('.panel-title').textContent = panelData.title;
 
+      const resizeLeft = document.createElement('div');
+      resizeLeft.className = 'panel-resize panel-resize-left';
+      resizeLeft.title = '拖动调整面板宽度';
+
+      const resizeRight = document.createElement('div');
+      resizeRight.className = 'panel-resize panel-resize-right';
+      resizeRight.title = '拖动调整面板宽度';
+
+      panel.append(resizeLeft, resizeRight);
+
       if (kind === 'note') {
         const body = document.createElement('textarea');
         body.className = 'note-body';
         body.placeholder = '在这里写点什么…';
         body.value = panelData.note || '';
+        if (panelData.height > 0) {
+          panel.dataset.height = String(panelData.height);
+          body.style.height = panelData.height + 'px';
+        }
         if (noteResizeObserver) noteResizeObserver.observe(body);
-        panel.append(head, body);
+
+        const resizeBottom = document.createElement('div');
+        resizeBottom.className = 'panel-resize-bottom';
+        resizeBottom.title = '拖动调整便签高度';
+        panel.classList.add('has-bottom-handle');
+
+        panel.append(head, body, resizeBottom);
         return panel;
       }
 
@@ -833,42 +988,67 @@
       for (const panel of panels) panelList.appendChild(makePanel(panel));
       // 旧数据没有列号时，补一次自动落位
       for (const el of panelList.querySelectorAll(':scope > .panel:not([data-col])')) {
-        placePanel(el);
+        autoPlace(el);
       }
       layoutPanels();
     }
 
-    // ---------- 布局：面板按列摆放，列内按 DOM 顺序堆叠 ----------
-    const COLUMN_BREAKPOINTS = [
-      { min: 1180, columns: 4 },
-      { min: 860, columns: 3 },
-      { min: 560, columns: 2 },
-      { min: 0, columns: 1 },
-    ];
+    // ---------- 布局：12 栏背景板，面板按「起始栏 + 跨度」摆放 ----------
+    const GRID_COLS = 12;
+    const DEFAULT_SPAN = 3;
+    const MIN_SPAN = 1;
     const PANEL_GAP = 16;
 
     let layoutQueued = false;
 
-    function columnCount() {
-      const width = panelList.clientWidth;
-      for (const bp of COLUMN_BREAKPOINTS) {
-        if (width >= bp.min) return bp.columns;
-      }
-      return 1;
+    function gridGeometry() {
+      const columns = GRID_COLS;
+      const total = panelList.clientWidth;
+      const colWidth = (total - PANEL_GAP * (columns - 1)) / columns;
+      return {
+        columns,
+        left: panelList.getBoundingClientRect().left,
+        colWidth,
+        step: colWidth + PANEL_GAP,
+      };
     }
 
-    // 窗口变窄时列数会减少，超出范围的列号只在显示时折回，不改动保存的位置
     function storedCol(el) {
       const col = Number(el.dataset.col);
       return Number.isFinite(col) ? col : 0;
     }
 
-    function effectiveCol(el) {
-      return clampCol(storedCol(el), columnCount());
+    function storedSpan(el) {
+      const span = Number(el.dataset.span);
+      return Number.isFinite(span) ? span : DEFAULT_SPAN;
     }
 
-    function clampCol(col, columns) {
-      return Math.min(Math.max(col, 0), columns - 1);
+    function clampSpan(span) {
+      return Math.min(Math.max(Math.round(span), MIN_SPAN), GRID_COLS);
+    }
+
+    // 跨度不能越出右边栏位，列号优先保持
+    function fitToGrid(col, span) {
+      const s = clampSpan(span);
+      const c = Math.min(Math.max(Math.round(col), 0), GRID_COLS - s);
+      return { col: c, span: s };
+    }
+
+    function spanWidth(colWidth, span) {
+      return span * colWidth + (span - 1) * PANEL_GAP;
+    }
+
+    // 在已占用的矩形中找出第一个放得下的纵向位置（被挡就继续往下推）
+    function findFreeTop(placed, x0, x1, height) {
+      let top = 0;
+      for (let guard = 0; guard < 200; guard += 1) {
+        const blocking = placed.filter(
+          (r) => r.x0 < x1 && r.x1 > x0 && r.y0 < top + height && r.y1 > top
+        );
+        if (!blocking.length) return top;
+        top = Math.max(...blocking.map((r) => r.y1)) + PANEL_GAP;
+      }
+      return top;
     }
 
     function layoutPanels() {
@@ -878,39 +1058,60 @@
         return;
       }
 
-      const columns = columnCount();
-      const total = panelList.clientWidth;
-      const colWidth = (total - PANEL_GAP * (columns - 1)) / columns;
-      const heights = new Array(columns).fill(0);
+      const geo = gridGeometry();
 
+      // 先定宽并归一化栏位，再按占用关系纵向摆放
       for (const el of panelEls) {
-        el.style.position = 'absolute';
-        el.style.width = colWidth + 'px';
+        const { col, span } = fitToGrid(storedCol(el), storedSpan(el));
+        el.dataset.col = String(col);
+        el.dataset.span = String(span);
+        el.style.width = spanWidth(geo.colWidth, span) + 'px';
+        el.style.left = (col * geo.step) + 'px';
+        el.style.top = '0px';
       }
 
+      const rects = [];
       for (const el of panelEls) {
-        const col = effectiveCol(el);
-        el.style.left = (col * (colWidth + PANEL_GAP)) + 'px';
-        el.style.top = heights[col] + 'px';
-        heights[col] += el.offsetHeight + PANEL_GAP;
+        const x0 = storedCol(el) * geo.step;
+        const x1 = x0 + el.offsetWidth;
+        const height = el.offsetHeight;
+        const top = findFreeTop(rects, x0, x1, height);
+        el.style.top = top + 'px';
+        rects.push({ x0, x1, y0: top, y1: top + height });
       }
 
-      panelList.style.height = (Math.max(...heights) - PANEL_GAP) + 'px';
+      const bottom = rects.reduce((max, r) => Math.max(max, r.y1), 0);
+      panelList.style.height = bottom + 'px';
     }
 
-    // 新面板放进当前最矮的一列末尾，已有面板位置不受影响
-    function placePanel(panelEl) {
-      const columns = columnCount();
-      const heights = new Array(columns).fill(0);
+    // 新面板：找一处放得最低的栏位，同高时靠左
+    function autoPlace(panelEl) {
+      const geo = gridGeometry();
+      const span = clampSpan(storedSpan(panelEl));
+      const width = spanWidth(geo.colWidth, span);
+      panelEl.style.width = width + 'px';
+
+      const listRect = panelList.getBoundingClientRect();
+      const rects = [];
       for (const el of panelList.querySelectorAll(':scope > .panel')) {
-        if (el === panelEl || !el.dataset.col) continue;
-        heights[effectiveCol(el)] += el.offsetHeight + PANEL_GAP;
+        if (el === panelEl) continue;
+        const r = el.getBoundingClientRect();
+        rects.push({
+          x0: r.left - listRect.left,
+          x1: r.right - listRect.left,
+          y0: r.top - listRect.top,
+          y1: r.bottom - listRect.top,
+        });
       }
-      let target = 0;
-      for (let i = 1; i < columns; i += 1) {
-        if (heights[i] < heights[target]) target = i;
+      const height = panelEl.offsetHeight || 160;
+      let best = { col: 0, top: Infinity };
+      for (let col = 0; col <= GRID_COLS - span; col += 1) {
+        const x0 = col * geo.step;
+        const top = findFreeTop(rects, x0, x0 + width, height);
+        if (top < best.top) best = { col, top };
       }
-      panelEl.dataset.col = String(target);
+      panelEl.dataset.col = String(best.col);
+      panelEl.dataset.span = String(span);
     }
 
     function scheduleLayout() {
@@ -922,10 +1123,149 @@
       });
     }
 
+    // 拖拽/调宽时显示 12 栏背景板
+    function gridGuides() {
+      let guides = panelList.querySelectorAll(':scope > .grid-guide');
+      if (guides.length !== GRID_COLS) {
+        for (const g of guides) g.remove();
+        const frag = document.createDocumentFragment();
+        for (let i = 0; i < GRID_COLS; i += 1) {
+          const g = document.createElement('div');
+          g.className = 'grid-guide';
+          g.dataset.index = String(i);
+          frag.appendChild(g);
+        }
+        panelList.appendChild(frag);
+        guides = panelList.querySelectorAll(':scope > .grid-guide');
+      }
+      const geo = gridGeometry();
+      for (const g of guides) {
+        const i = Number(g.dataset.index);
+        g.style.left = (i * geo.step) + 'px';
+        g.style.width = geo.colWidth + 'px';
+      }
+    }
+
+    function setGridActive(active) {
+      if (active) {
+        gridGuides();
+        panelList.classList.add('grid-active');
+      } else {
+        panelList.classList.remove('grid-active');
+      }
+    }
+
     // 便签手动拉伸会改变面板高度，需要跟着重排
     const noteResizeObserver = window.ResizeObserver
       ? new ResizeObserver(() => scheduleLayout())
       : null;
+
+    // ---------- 拖拽边缘调整面板尺寸 ----------
+    const MIN_NOTE_HEIGHT = 80;
+
+    function startPanelResize(e, panel, edge) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const geo = gridGeometry();
+      const startCol = storedCol(panel);
+      const startSpan = storedSpan(panel);
+      const before = serialize();
+
+      panel.classList.add('resizing');
+      document.body.classList.add('panel-resizing');
+      setGridActive(true);
+      panel.setPointerCapture(e.pointerId);
+
+      const onMove = (ev) => {
+        const pointerCol = Math.round((ev.clientX - geo.left) / geo.step);
+        if (edge === 'right') {
+          // 左边界不动，右边界跟着指针吸到栏位
+          const span = clampSpan(Math.min(pointerCol, GRID_COLS) - startCol);
+          const next = fitToGrid(startCol, span);
+          panel.dataset.col = String(next.col);
+          panel.dataset.span = String(next.span);
+        } else {
+          // 右边界不动，左边界跟着指针吸到栏位
+          const rightEdge = startCol + startSpan;
+          const leftCol = Math.min(Math.max(pointerCol, 0), rightEdge - MIN_SPAN);
+          panel.dataset.col = String(leftCol);
+          panel.dataset.span = String(rightEdge - leftCol);
+        }
+        layoutPanels();
+      };
+
+      const finish = () => {
+        panel.removeEventListener('pointermove', onMove);
+        panel.removeEventListener('pointerup', finish);
+        panel.removeEventListener('pointercancel', finish);
+        panel.classList.remove('resizing');
+        document.body.classList.remove('panel-resizing');
+        setGridActive(false);
+        if (serialize() !== before) {
+          persist();
+          pushUndo(before);
+        }
+        layoutPanels();
+      };
+
+      panel.addEventListener('pointermove', onMove);
+      panel.addEventListener('pointerup', finish);
+      panel.addEventListener('pointercancel', finish);
+    }
+
+    function startNoteResize(e, panel) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const note = panel.querySelector('.note-body');
+      const startY = e.clientY;
+      const startHeight = note.getBoundingClientRect().height;
+      const before = serialize();
+
+      panel.classList.add('resizing-y');
+      document.body.classList.add('panel-resizing-y');
+      setGridActive(true);
+      panel.setPointerCapture(e.pointerId);
+
+      const onMove = (ev) => {
+        const height = Math.max(MIN_NOTE_HEIGHT, Math.round(startHeight + ev.clientY - startY));
+        note.style.height = height + 'px';
+        panel.dataset.height = String(height);
+        layoutPanels();
+      };
+
+      const finish = () => {
+        panel.removeEventListener('pointermove', onMove);
+        panel.removeEventListener('pointerup', finish);
+        panel.removeEventListener('pointercancel', finish);
+        panel.classList.remove('resizing-y');
+        document.body.classList.remove('panel-resizing-y');
+        setGridActive(false);
+        if (serialize() !== before) {
+          persist();
+          pushUndo(before);
+        }
+        layoutPanels();
+      };
+
+      panel.addEventListener('pointermove', onMove);
+      panel.addEventListener('pointerup', finish);
+      panel.addEventListener('pointercancel', finish);
+    }
+
+    boardEl.addEventListener('pointerdown', (e) => {
+      const handle = e.target.closest('.panel-resize');
+      if (handle) {
+        const panel = handle.closest('.panel');
+        startPanelResize(e, panel, handle.classList.contains('panel-resize-left') ? 'left' : 'right');
+        return;
+      }
+      const bottomHandle = e.target.closest('.panel-resize-bottom');
+      if (bottomHandle) {
+        startNoteResize(e, bottomHandle.closest('.panel'));
+      }
+    });
 
     // ---------- 点击操作 ----------
     boardEl.addEventListener('click', (e) => {
@@ -1260,10 +1600,12 @@
         id: uid(),
         kind: 'tasks',
         title: nextPanelTitle('面板'),
+        span: DEFAULT_SPAN,
         tasks: [],
       });
       panelList.appendChild(panel);
-      placePanel(panel);
+      panel.dataset.span = String(DEFAULT_SPAN);
+      autoPlace(panel);
       layoutPanels();
       persist();
       pushUndo(before);
@@ -1275,10 +1617,12 @@
         id: uid(),
         kind: 'note',
         title: nextPanelTitle('便签'),
+        span: DEFAULT_SPAN,
         note: '',
       });
       panelList.appendChild(panel);
-      placePanel(panel);
+      panel.dataset.span = String(DEFAULT_SPAN);
+      autoPlace(panel);
       layoutPanels();
       persist();
       pushUndo(before);
@@ -1304,9 +1648,12 @@
     let pendingPanelDrop = null;
     let panelDragArmed = false;
     let dragBlocked = false;
+    let dragGrabRatio = 0.5;
 
     boardEl.addEventListener('pointerdown', (e) => {
-      dragBlocked = !!e.target.closest('button, input, textarea, [contenteditable="true"]');
+      dragBlocked = !!e.target.closest(
+        'button, input, textarea, [contenteditable="true"], .panel-resize, .panel-resize-bottom'
+      );
       panelDragArmed = !!e.target.closest('.panel-head') && !dragBlocked;
     });
 
@@ -1324,6 +1671,8 @@
         dragKind = 'panel';
         dragPanelEl = panelEl;
         dragSnapshot = snapshot;
+        const rect = panelEl.getBoundingClientRect();
+        dragGrabRatio = rect.width ? Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1) : 0.5;
         panelEl.classList.add('dragging');
       } else {
         e.preventDefault();
@@ -1333,6 +1682,7 @@
       editSuppressUntil = Date.now() + 300;
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', '');
+      if (dragKind === 'panel') setGridActive(true);
     });
 
     boardEl.addEventListener('dragover', (e) => {
@@ -1388,15 +1738,14 @@
       }
     });
 
-    // 把面板挪到目标列：同一列内按上下关系重排，跨列时插到该列对应位置
-    function applyPanelDrop({ col, before }) {
+    // 拖到哪一栏就吸附到哪一栏，跨度保持不变
+    function applyPanelDrop({ col }) {
       dragPanelEl.dataset.col = String(col);
-      if (before) panelList.insertBefore(dragPanelEl, before);
-      else panelList.appendChild(dragPanelEl);
     }
 
     boardEl.addEventListener('dragend', () => {
       hideDropLine();
+      setGridActive(false);
       if (dragTaskEl) dragTaskEl.classList.remove('dragging');
       if (dragPanelEl) dragPanelEl.classList.remove('dragging');
 
@@ -1446,56 +1795,28 @@
       dropLine.hidden = false;
     }
 
-    function showPanelLine({ col, before }) {
-      const geo = columnGeometry();
-      const colLeft = geo.left + col * (geo.colWidth + PANEL_GAP);
-      let top;
-      if (before) {
-        top = before.getBoundingClientRect().top - 5;
-      } else {
-        const inCol = panelsInColumn(col);
-        const last = inCol[inCol.length - 1];
-        top = last
-          ? last.getBoundingClientRect().bottom + PANEL_GAP - 5
-          : panelList.getBoundingClientRect().top + 4;
-      }
+    // 落点提示：目标栏位顶部画一条与面板同宽的虚线框
+    function showPanelLine({ col }) {
+      const geo = gridGeometry();
+      const span = storedSpan(dragPanelEl);
       dropLine.className = 'drop-line';
-      dropLine.style.left = colLeft + 'px';
-      dropLine.style.top = top + 'px';
-      dropLine.style.width = geo.colWidth + 'px';
+      dropLine.style.left = (geo.left + col * geo.step) + 'px';
+      dropLine.style.top = panelList.getBoundingClientRect().top + 'px';
+      dropLine.style.width = spanWidth(geo.colWidth, span) + 'px';
       dropLine.style.height = '2px';
       dropLine.hidden = false;
     }
 
-    function columnGeometry() {
-      const columns = columnCount();
-      return {
-        columns,
-        left: panelList.getBoundingClientRect().left,
-        colWidth: (panelList.clientWidth - PANEL_GAP * (columns - 1)) / columns,
-      };
-    }
-
-    function panelsInColumn(col) {
-      return [...panelList.querySelectorAll(':scope > .panel')]
-        .filter((el) => el !== dragPanelEl && effectiveCol(el) === col);
-    }
-
-    // 横向决定落在哪一列（允许整列留空），纵向决定插到列内哪个面板之前
-    function resolvePanelDrop(x, y) {
-      const geo = columnGeometry();
-      const step = geo.colWidth + PANEL_GAP;
-      const col = clampCol(Math.floor((x - geo.left + PANEL_GAP / 2) / step), geo.columns);
-
-      let before = null;
-      for (const el of panelsInColumn(col)) {
-        const rect = el.getBoundingClientRect();
-        if (y < rect.top + rect.height / 2) {
-          before = el;
-          break;
-        }
-      }
-      return { col, before };
+    // 面板吸附到鼠标所在的栏位起点，跨度不变
+    function resolvePanelDrop(x) {
+      const geo = gridGeometry();
+      const span = storedSpan(dragPanelEl);
+      const width = spanWidth(geo.colWidth, span);
+      // 按抓取点在面板内的相对比例换算出左边缘位置，避免指针与面板错位
+      const ratio = dragGrabRatio;
+      const rawLeft = x - width * ratio;
+      const { col } = fitToGrid(Math.round((rawLeft - geo.left) / geo.step), span);
+      return { col };
     }
 
     function hideDropLine() {
