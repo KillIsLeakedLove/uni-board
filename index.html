@@ -38,6 +38,7 @@
     --pill-done-bg: #e3f5ea;
     --pill-done-text: #1f7a44;
     --done-text: #8b929e;
+    --grid-line: rgba(79, 110, 247, .16);
   }
 
   html[data-theme="dark"] {
@@ -64,6 +65,7 @@
     --pill-done-bg: #173a28;
     --pill-done-text: #5fd190;
     --done-text: #7c8492;
+    --grid-line: rgba(91, 120, 255, .2);
   }
 
   * { box-sizing: border-box; }
@@ -148,19 +150,22 @@
     z-index: 1;
   }
 
-  /* 12 栏背景板：拖拽/调宽时提示网格粒度 */
+  /* 12 栏背景板：拖拽/调宽时在栏缝里显示细线，淡入淡出 */
   .grid-guide {
     position: absolute;
     top: 0;
     bottom: 0;
-    background: var(--accent-soft);
+    width: 1px;
+    background: var(--grid-line);
     opacity: 0;
-    transition: opacity .12s;
+    transition: opacity .18s ease;
     pointer-events: none;
     z-index: 0;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 8%, #000 92%, transparent);
+    mask-image: linear-gradient(to bottom, transparent, #000 8%, #000 92%, transparent);
   }
 
-  .panel-list.grid-active .grid-guide { opacity: .5; }
+  .panel-list.grid-active .grid-guide { opacity: 1; }
 
   body.panel-resizing,
   body.panel-resizing * {
@@ -261,7 +266,7 @@
   .note-body {
     width: 100%;
     flex: none;
-    min-height: 120px;
+    min-height: 80px;
     margin-top: 2px;
     padding: 8px 10px;
     border: 0;
@@ -652,12 +657,19 @@
   .drop-line {
     position: fixed;
     z-index: 30;
-    background: var(--drop-line);
-    border-radius: 2px;
+    border: 1.5px dashed var(--drop-line);
+    border-radius: 14px;
+    background: var(--accent-soft);
+    opacity: .6;
     pointer-events: none;
   }
 
-  .drop-line { height: 2px; }
+  .drop-line.is-row {
+    border: 0;
+    border-radius: 2px;
+    background: var(--drop-line);
+    opacity: 1;
+  }
 
   @media (max-width: 900px) {
     .topbar { flex-wrap: wrap; }
@@ -782,6 +794,7 @@
         title: panelEl.querySelector('.panel-title').textContent,
         col: storedCol(panelEl),
         span: storedSpan(panelEl),
+        top: Number(panelEl.dataset.top) || 0,
       };
       if (panelEl.dataset.kind === 'note') {
         return {
@@ -927,8 +940,16 @@
       panel.dataset.panelId = panelData.id;
       const kind = panelData.kind === 'note' ? 'note' : 'tasks';
       panel.dataset.kind = kind;
-      if (Number.isFinite(panelData.col)) panel.dataset.col = String(panelData.col);
-      if (Number.isFinite(panelData.span)) panel.dataset.span = String(panelData.span);
+      const hasSpan = Number.isFinite(panelData.span);
+      if (hasSpan) {
+        if (Number.isFinite(panelData.col)) panel.dataset.col = String(panelData.col);
+        panel.dataset.span = String(panelData.span);
+      } else if (Number.isFinite(panelData.col)) {
+        // 旧版四列数据：列号换算成 12 栏坐标，避免挤在左侧
+        panel.dataset.col = String(panelData.col * DEFAULT_SPAN);
+        panel.dataset.span = String(DEFAULT_SPAN);
+      }
+      if (Number.isFinite(panelData.top)) panel.dataset.top = String(panelData.top);
       if (kind === 'note') panel.classList.add('note-panel');
 
       const head = document.createElement('header');
@@ -966,7 +987,6 @@
         const resizeBottom = document.createElement('div');
         resizeBottom.className = 'panel-resize-bottom';
         resizeBottom.title = '拖动调整便签高度';
-        panel.classList.add('has-bottom-handle');
 
         panel.append(head, body, resizeBottom);
         return panel;
@@ -986,9 +1006,12 @@
       if (noteResizeObserver) noteResizeObserver.disconnect();
       for (const el of panelList.querySelectorAll(':scope > .panel')) el.remove();
       for (const panel of panels) panelList.appendChild(makePanel(panel));
-      // 旧数据没有列号时，补一次自动落位
+
+      // 先把带布局信息的定好位，再把缺布局的面板依次补进空位
+      layoutPanels();
       for (const el of panelList.querySelectorAll(':scope > .panel:not([data-col])')) {
         autoPlace(el);
+        layoutPanels();
       }
       layoutPanels();
     }
@@ -998,6 +1021,8 @@
     const DEFAULT_SPAN = 3;
     const MIN_SPAN = 1;
     const PANEL_GAP = 16;
+    // 与紧凑位置相差在此范围内才自动吸顶/吸附
+    const SNAP_DISTANCE = 48;
 
     let layoutQueued = false;
 
@@ -1051,8 +1076,28 @@
       return top;
     }
 
+    // 从期望位置开始找不重叠的落点（保留上方空白）
+    function resolveTop(placed, x0, x1, height, desired) {
+      let top = Math.max(0, desired);
+      for (let guard = 0; guard < 200; guard += 1) {
+        const blocking = placed.filter(
+          (r) => r.x0 < x1 && r.x1 > x0 && r.y0 < top + height && r.y1 > top
+        );
+        if (!blocking.length) return top;
+        top = Math.max(...blocking.map((r) => r.y1)) + PANEL_GAP;
+      }
+      return top;
+    }
+
     function layoutPanels() {
-      const panelEls = [...panelList.querySelectorAll(':scope > .panel')];
+      const allEls = [...panelList.querySelectorAll(':scope > .panel')];
+      if (!allEls.length) {
+        panelList.style.height = '';
+        return;
+      }
+
+      // 还没确定栏位的面板不参与排布，等 autoPlace 分配后再显示
+      const panelEls = allEls.filter((el) => el.dataset.col);
       if (!panelEls.length) {
         panelList.style.height = '';
         return;
@@ -1067,7 +1112,6 @@
         el.dataset.span = String(span);
         el.style.width = spanWidth(geo.colWidth, span) + 'px';
         el.style.left = (col * geo.step) + 'px';
-        el.style.top = '0px';
       }
 
       const rects = [];
@@ -1075,8 +1119,20 @@
         const x0 = storedCol(el) * geo.step;
         const x1 = x0 + el.offsetWidth;
         const height = el.offsetHeight;
-        const top = findFreeTop(rects, x0, x1, height);
+
+        // 紧凑排布位置：当期望位置离它足够近时自动吸过去
+        const packed = findFreeTop(rects, x0, x1, height);
+        const desired = Number(el.dataset.top);
+        let top;
+        if (Number.isFinite(desired) && Math.abs(desired - packed) > SNAP_DISTANCE) {
+          top = resolveTop(rects, x0, x1, height, desired);
+        } else {
+          top = packed;
+        }
+
+        // 只渲染，不写回期望位置：被挤开是暂时的，窗口变化后能回到原处
         el.style.top = top + 'px';
+        el.dataset.renderedTop = String(top);
         rects.push({ x0, x1, y0: top, y1: top + height });
       }
 
@@ -1084,34 +1140,33 @@
       panelList.style.height = bottom + 'px';
     }
 
-    // 新面板：找一处放得最低的栏位，同高时靠左
+    // 新面板：在所有栏位里找一个能放得最靠上的位置，同高时靠左
     function autoPlace(panelEl) {
       const geo = gridGeometry();
       const span = clampSpan(storedSpan(panelEl));
       const width = spanWidth(geo.colWidth, span);
       panelEl.style.width = width + 'px';
 
-      const listRect = panelList.getBoundingClientRect();
+      // 只统计已定位面板的已排布位置（不是视觉位置，避免被临时挤压影响）
       const rects = [];
       for (const el of panelList.querySelectorAll(':scope > .panel')) {
-        if (el === panelEl) continue;
-        const r = el.getBoundingClientRect();
-        rects.push({
-          x0: r.left - listRect.left,
-          x1: r.right - listRect.left,
-          y0: r.top - listRect.top,
-          y1: r.bottom - listRect.top,
-        });
+        if (el === panelEl || !el.dataset.col) continue;
+        const col = storedCol(el);
+        const top = Number(el.dataset.renderedTop) || 0;
+        const x0 = col * geo.step;
+        rects.push({ x0, x1: x0 + el.offsetWidth, y0: top, y1: top + el.offsetHeight });
       }
+
       const height = panelEl.offsetHeight || 160;
       let best = { col: 0, top: Infinity };
       for (let col = 0; col <= GRID_COLS - span; col += 1) {
         const x0 = col * geo.step;
         const top = findFreeTop(rects, x0, x0 + width, height);
-        if (top < best.top) best = { col, top };
+        if (top < best.top - 0.5) best = { col, top };
       }
       panelEl.dataset.col = String(best.col);
       panelEl.dataset.span = String(span);
+      panelEl.dataset.top = String(best.top);
     }
 
     function scheduleLayout() {
@@ -1141,8 +1196,11 @@
       const geo = gridGeometry();
       for (const g of guides) {
         const i = Number(g.dataset.index);
-        g.style.left = (i * geo.step) + 'px';
-        g.style.width = geo.colWidth + 'px';
+        // 放在栏缝中线上，而不是占据整栏
+        g.style.left = (i === 0
+          ? 0
+          : i * geo.step - PANEL_GAP / 2) + 'px';
+        g.style.width = '1px';
       }
     }
 
@@ -1180,11 +1238,10 @@
       const onMove = (ev) => {
         const pointerCol = Math.round((ev.clientX - geo.left) / geo.step);
         if (edge === 'right') {
-          // 左边界不动，右边界跟着指针吸到栏位
-          const span = clampSpan(Math.min(pointerCol, GRID_COLS) - startCol);
-          const next = fitToGrid(startCol, span);
-          panel.dataset.col = String(next.col);
-          panel.dataset.span = String(next.span);
+          // 左边界锁定：只改变跨度，不挪动列号
+          const span = Math.min(Math.max(pointerCol - startCol + 1, MIN_SPAN), GRID_COLS - startCol);
+          panel.dataset.col = String(startCol);
+          panel.dataset.span = String(span);
         } else {
           // 右边界不动，左边界跟着指针吸到栏位
           const rightEdge = startCol + startSpan;
@@ -1544,10 +1601,6 @@
         const title = input.value.trim();
         row.remove();
         if (save && title) {
-          if (parentLi) {
-            parentLi.dataset.collapsed = '0';
-            refreshCollapse(parentLi);
-          }
           container.appendChild(makeTask({
             id: uid(),
             title,
@@ -1556,6 +1609,11 @@
             collapsed: false,
             children: [],
           }, depth));
+          // 父级要等子任务挂上后再刷新，否则折叠按钮仍是禁用态
+          if (parentLi) {
+            parentLi.dataset.collapsed = '0';
+            refreshCollapse(parentLi);
+          }
           persist();
           pushUndo(before);
         }
@@ -1649,6 +1707,7 @@
     let panelDragArmed = false;
     let dragBlocked = false;
     let dragGrabRatio = 0.5;
+    let dragGrabRatioY = 0;
 
     boardEl.addEventListener('pointerdown', (e) => {
       dragBlocked = !!e.target.closest(
@@ -1673,6 +1732,7 @@
         dragSnapshot = snapshot;
         const rect = panelEl.getBoundingClientRect();
         dragGrabRatio = rect.width ? Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1) : 0.5;
+        dragGrabRatioY = rect.height ? Math.min(Math.max((e.clientY - rect.top) / rect.height, 0), 1) : 0;
         panelEl.classList.add('dragging');
       } else {
         e.preventDefault();
@@ -1703,15 +1763,10 @@
 
       if (dragKind === 'panel') {
         const drop = resolvePanelDrop(e.clientX, e.clientY);
-        if (!drop) {
-          pendingPanelDrop = null;
-          hideDropLine();
-          return;
-        }
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
         pendingPanelDrop = drop;
-        showPanelLine(drop);
+        showPanelDropPreview(drop);
       }
     });
 
@@ -1787,36 +1842,65 @@
         const last = siblings[siblings.length - 1];
         top = last ? last.getBoundingClientRect().bottom + 1 : rect.top + 6;
       }
-      dropLine.className = 'drop-line';
+      dropLine.className = 'drop-line is-row';
       dropLine.style.left = (rect.left + 4) + 'px';
       dropLine.style.top = top + 'px';
       dropLine.style.width = Math.max(rect.width - 8, 40) + 'px';
-      dropLine.style.height = '';
-      dropLine.hidden = false;
-    }
-
-    // 落点提示：目标栏位顶部画一条与面板同宽的虚线框
-    function showPanelLine({ col }) {
-      const geo = gridGeometry();
-      const span = storedSpan(dragPanelEl);
-      dropLine.className = 'drop-line';
-      dropLine.style.left = (geo.left + col * geo.step) + 'px';
-      dropLine.style.top = panelList.getBoundingClientRect().top + 'px';
-      dropLine.style.width = spanWidth(geo.colWidth, span) + 'px';
       dropLine.style.height = '2px';
       dropLine.hidden = false;
     }
 
-    // 面板吸附到鼠标所在的栏位起点，跨度不变
-    function resolvePanelDrop(x) {
+    // 落点预览：目标栏位 + 纵向位置，与最终排布一致
+    function showPanelDropPreview({ col, top }) {
+      const geo = gridGeometry();
+      const span = storedSpan(dragPanelEl);
+      dropLine.className = 'drop-line';
+      dropLine.style.left = (geo.left + col * geo.step) + 'px';
+      dropLine.style.top = (panelList.getBoundingClientRect().top + top) + 'px';
+      dropLine.style.width = spanWidth(geo.colWidth, span) + 'px';
+      dropLine.style.height = dragPanelEl.offsetHeight + 'px';
+      dropLine.hidden = false;
+    }
+
+    // 横向吸附到栏位，纵向跟随指针；离紧凑位置近时吸顶
+    function resolvePanelDrop(x, y) {
       const geo = gridGeometry();
       const span = storedSpan(dragPanelEl);
       const width = spanWidth(geo.colWidth, span);
-      // 按抓取点在面板内的相对比例换算出左边缘位置，避免指针与面板错位
-      const ratio = dragGrabRatio;
-      const rawLeft = x - width * ratio;
+      const rawLeft = x - width * dragGrabRatio;
       const { col } = fitToGrid(Math.round((rawLeft - geo.left) / geo.step), span);
-      return { col };
+
+      const listTop = panelList.getBoundingClientRect().top;
+      const height = dragPanelEl.offsetHeight;
+      const rawTop = Math.max(0, Math.round(y - listTop - height * dragGrabRatioY));
+
+      // 用其他面板的占位估算紧凑位置，判断是否吸顶
+      const x0 = col * geo.step;
+      const x1 = x0 + width;
+      const listRect = panelList.getBoundingClientRect();
+      const others = [];
+      for (const el of panelList.querySelectorAll(':scope > .panel')) {
+        if (el === dragPanelEl) continue;
+        const r = el.getBoundingClientRect();
+        others.push({
+          x0: r.left - listRect.left,
+          x1: r.right - listRect.left,
+          y0: r.top - listRect.top,
+          y1: r.bottom - listRect.top,
+        });
+      }
+      const packed = findFreeTop(others, x0, x1, height);
+      const top = Math.abs(rawTop - packed) <= SNAP_DISTANCE
+        ? packed
+        : resolveTop(others, x0, x1, height, rawTop);
+
+      return { col, top };
+    }
+
+    // 拖到哪一栏、哪个高度就落在哪
+    function applyPanelDrop({ col, top }) {
+      dragPanelEl.dataset.col = String(col);
+      dragPanelEl.dataset.top = String(top);
     }
 
     function hideDropLine() {
