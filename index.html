@@ -79,7 +79,7 @@
   }
 
   .topbar {
-    max-width: 1404px;
+    max-width: 1800px;
     margin: 0 auto;
     padding: 28px 20px 18px;
     display: flex;
@@ -126,7 +126,7 @@
   }
 
   .app {
-    max-width: 1404px;
+    max-width: 1800px;
     margin: 0 auto;
     padding: 0 20px 40px;
   }
@@ -136,12 +136,14 @@
   }
 
   .panel-list {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(598px, 1fr));
-    gap: 16px;
-    align-items: start;
+    position: relative;
   }
 
+  .panel-list > .panel {
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
   .panel {
     background: var(--panel);
     border-radius: 14px;
@@ -150,6 +152,31 @@
     display: flex;
     flex-direction: column;
     min-height: 160px;
+  }
+
+  .panel.note-panel { min-height: 0; }
+
+  .note-body {
+    width: 100%;
+    flex: 1;
+    min-height: 120px;
+    margin-top: 2px;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--panel-hover);
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+    line-height: 1.6;
+    resize: vertical;
+    outline: none;
+  }
+
+  .note-body::placeholder { color: var(--muted); }
+
+  .note-body:focus {
+    box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--focus-ring);
   }
 
   .panel.dragging { opacity: .45; }
@@ -224,21 +251,28 @@
   }
 
   .add-panel {
-    width: 100%;
-    height: 140px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 16px;
+  }
+
+  .add-panel-btn {
+    min-width: 0;
+    height: 64px;
     border: 1.5px dashed var(--input-border);
     border-radius: 14px;
     background: transparent;
     color: var(--muted);
     font: inherit;
-    font-size: 14px;
+    font-size: 13px;
     cursor: pointer;
     display: grid;
     place-items: center;
     transition: border-color .12s, color .12s, background .12s;
   }
 
-  .add-panel:hover {
+  .add-panel-btn:hover {
     border-color: var(--accent);
     color: var(--accent);
     background: var(--accent-soft);
@@ -311,14 +345,14 @@
   .task.collapsed > .children { display: none; }
 
   .status-pill {
-    flex-shrink: 0;
-    min-width: 62px;
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: 6px;
     border: 0;
     border-radius: 999px;
-    padding: 2px 8px;
-    margin-top: 1px;
-    font-size: 12px;
-    line-height: 1.6;
+    padding: 0 6px;
+    font-size: 11px;
+    line-height: 18px;
     font-family: inherit;
     cursor: pointer;
   }
@@ -331,11 +365,12 @@
   .main {
     flex: 1;
     min-width: 0;
+    display: flow-root;
     padding-top: 3px;
   }
 
   .task-title {
-    display: block;
+    display: inline;
     overflow-wrap: anywhere;
     white-space: pre-wrap;
   }
@@ -478,10 +513,13 @@
 
   .drop-line { height: 2px; }
 
-  @media (max-width: 560px) {
+  @media (max-width: 900px) {
     .topbar { flex-wrap: wrap; }
     .topbar-actions { padding-top: 0; }
-    .panel-list { grid-template-columns: 1fr; }
+  }
+
+  @media (max-width: 560px) {
+    .add-panel { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -500,8 +538,10 @@
 
   <main class="app">
     <div class="board" id="board">
-      <div class="panel-list" id="panel-list">
-        <button class="add-panel" id="add-panel" type="button">＋ 新建面板</button>
+      <div class="panel-list" id="panel-list"></div>
+      <div class="add-panel" id="add-panel">
+        <button class="add-panel-btn" id="add-task-panel" type="button">＋ 新建任务面板</button>
+        <button class="add-panel-btn" id="add-note-panel" type="button">＋ 新建便签</button>
       </div>
     </div>
   </main>
@@ -519,7 +559,8 @@
 
     const boardEl = document.getElementById('board');
     const panelList = document.getElementById('panel-list');
-    const addPanelBtn = document.getElementById('add-panel');
+    const addTaskPanelBtn = document.getElementById('add-task-panel');
+    const addNotePanelBtn = document.getElementById('add-note-panel');
     const dropLine = document.getElementById('drop-line');
     const undoBtn = document.getElementById('undo-btn');
     const importBtn = document.getElementById('import-btn');
@@ -590,12 +631,21 @@
     }
 
     function readPanel(panelEl) {
+      if (panelEl.dataset.kind === 'note') {
+        return {
+          id: panelEl.dataset.panelId,
+          kind: 'note',
+          title: panelEl.querySelector('.panel-title').textContent,
+          note: panelEl.querySelector('.note-body').value,
+        };
+      }
       const tasks = [];
       for (const li of panelEl.querySelectorAll(':scope > .task-tree > .task')) {
         tasks.push(readTask(li));
       }
       return {
         id: panelEl.dataset.panelId,
+        kind: 'tasks',
         title: panelEl.querySelector('.panel-title').textContent,
         tasks,
       };
@@ -662,12 +712,13 @@
       title.className = 'task-title';
       title.textContent = task.title;
 
+      // 角标内嵌到标题行开头，不再单独占据一列
       const content = document.createElement('span');
       content.className = 'task-content';
       content.textContent = task.content || '';
       if (!task.content) content.dataset.empty = '1';
 
-      main.append(title, content);
+      main.append(pill, title, content);
 
       const actions = document.createElement('div');
       actions.className = 'row-actions';
@@ -688,7 +739,7 @@
       del.textContent = '×';
       actions.appendChild(del);
 
-      row.append(collapseBtn, pill, main, actions);
+      row.append(collapseBtn, main, actions);
 
       const children = document.createElement('ul');
       children.className = 'children';
@@ -703,7 +754,7 @@
     }
 
     function paintPill(li) {
-      const pill = li.querySelector(':scope > .row > .status-pill');
+      const pill = li.querySelector(':scope > .row > .main > .status-pill');
       const status = li.dataset.status;
       pill.dataset.status = status;
       pill.textContent = STATUS_LABEL[status];
@@ -723,6 +774,9 @@
       panel.className = 'panel';
       panel.draggable = true;
       panel.dataset.panelId = panelData.id;
+      const kind = panelData.kind === 'note' ? 'note' : 'tasks';
+      panel.dataset.kind = kind;
+      if (kind === 'note') panel.classList.add('note-panel');
 
       const head = document.createElement('header');
       head.className = 'panel-head';
@@ -730,10 +784,20 @@
         '<span class="panel-grip" aria-hidden="true">⋮⋮</span>' +
         '<h2 class="panel-title" title="点击重命名"></h2>' +
         '<div class="panel-actions">' +
-          '<button class="panel-add" type="button" title="添加任务">＋</button>' +
+          (kind === 'tasks' ? '<button class="panel-add" type="button" title="添加任务">＋</button>' : '') +
           '<button class="panel-del" type="button" title="删除面板">×</button>' +
         '</div>';
       head.querySelector('.panel-title').textContent = panelData.title;
+
+      if (kind === 'note') {
+        const body = document.createElement('textarea');
+        body.className = 'note-body';
+        body.placeholder = '在这里写点什么…';
+        body.value = panelData.note || '';
+        if (noteResizeObserver) noteResizeObserver.observe(body);
+        panel.append(head, body);
+        return panel;
+      }
 
       const tree = document.createElement('ul');
       tree.className = 'task-tree';
@@ -746,11 +810,77 @@
     }
 
     function renderPanels(panels) {
+      if (noteResizeObserver) noteResizeObserver.disconnect();
       for (const el of panelList.querySelectorAll(':scope > .panel')) el.remove();
-      for (const panel of panels) {
-        panelList.insertBefore(makePanel(panel), addPanelBtn);
-      }
+      for (const panel of panels) panelList.appendChild(makePanel(panel));
+      layoutPanels();
     }
+
+    // ---------- 瀑布流布局：按顺序放入当前最短的一列 ----------
+    const COLUMN_BREAKPOINTS = [
+      { min: 1180, columns: 4 },
+      { min: 860, columns: 3 },
+      { min: 560, columns: 2 },
+      { min: 0, columns: 1 },
+    ];
+
+    let layoutQueued = false;
+
+    function columnCount() {
+      const width = panelList.clientWidth;
+      for (const bp of COLUMN_BREAKPOINTS) {
+        if (width >= bp.min) return bp.columns;
+      }
+      return 1;
+    }
+
+    function layoutPanels() {
+      const panelEls = [...panelList.querySelectorAll(':scope > .panel')];
+      if (!panelEls.length) {
+        panelList.style.height = '';
+        return;
+      }
+
+      const gap = 16;
+      const columns = columnCount();
+      const total = panelList.clientWidth;
+      const colWidth = (total - gap * (columns - 1)) / columns;
+      const heights = new Array(columns).fill(0);
+
+      for (const el of panelEls) {
+        el.style.position = 'absolute';
+        el.style.width = colWidth + 'px';
+        el.style.left = '';
+        el.style.top = '';
+      }
+
+      for (const el of panelEls) {
+        const h = el.offsetHeight;
+        let col = 0;
+        for (let i = 1; i < columns; i += 1) {
+          if (heights[i] < heights[col]) col = i;
+        }
+        el.style.left = (col * (colWidth + gap)) + 'px';
+        el.style.top = heights[col] + 'px';
+        heights[col] += h + gap;
+      }
+
+      panelList.style.height = (Math.max(...heights) - gap) + 'px';
+    }
+
+    function scheduleLayout() {
+      if (layoutQueued) return;
+      layoutQueued = true;
+      requestAnimationFrame(() => {
+        layoutQueued = false;
+        layoutPanels();
+      });
+    }
+
+    // 便签手动拉伸会改变面板高度，需要跟着重排
+    const noteResizeObserver = window.ResizeObserver
+      ? new ResizeObserver(() => scheduleLayout())
+      : null;
 
     // ---------- 点击操作 ----------
     boardEl.addEventListener('click', (e) => {
@@ -758,6 +888,7 @@
       if (panelDel) {
         const before = serialize();
         panelDel.closest('.panel').remove();
+        layoutPanels();
         persist();
         pushUndo(before);
         return;
@@ -777,6 +908,7 @@
         const before = serialize();
         li.dataset.collapsed = li.dataset.collapsed === '1' ? '0' : '1';
         refreshCollapse(li);
+        layoutPanels();
         persist();
         pushUndo(before);
         return;
@@ -811,6 +943,7 @@
         const parentLi = li.parentElement.closest('.task');
         li.remove();
         if (parentLi) refreshCollapse(parentLi);
+        layoutPanels();
         persist();
         pushUndo(before);
         return;
@@ -863,6 +996,7 @@
           persist();
           pushUndo(before);
         }
+        layoutPanels();
       };
 
       const onKey = (ev) => {
@@ -908,6 +1042,7 @@
           persist();
           pushUndo(before);
         }
+        layoutPanels();
       };
 
       const onKey = (ev) => {
@@ -976,10 +1111,14 @@
           persist();
           pushUndo(before);
         }
+        layoutPanels();
       };
 
       textarea.addEventListener('blur', () => finish(true));
-      textarea.addEventListener('input', () => fitContentEditor(textarea));
+      textarea.addEventListener('input', () => {
+        fitContentEditor(textarea);
+        scheduleLayout();
+      });
       textarea.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
           e.preventDefault();
@@ -1035,6 +1174,7 @@
           persist();
           pushUndo(before);
         }
+        layoutPanels();
       };
 
       input.addEventListener('keydown', (e) => {
@@ -1049,25 +1189,61 @@
       input.addEventListener('blur', () => close(true));
     }
 
+    // ---------- 便签输入 ----------
+    const noteSaveTimers = new WeakMap();
+
+    boardEl.addEventListener('input', (e) => {
+      const note = e.target.closest('.note-body');
+      if (!note) return;
+      scheduleLayout();
+      const panel = note.closest('.panel');
+      clearTimeout(noteSaveTimers.get(panel));
+      noteSaveTimers.set(panel, setTimeout(persist, 400));
+    });
+
+    boardEl.addEventListener('change', (e) => {
+      const note = e.target.closest('.note-body');
+      if (!note) return;
+      persist();
+      layoutPanels();
+    });
+
     // ---------- 添加面板 ----------
-    addPanelBtn.addEventListener('click', () => {
+    addTaskPanelBtn.addEventListener('click', () => {
       const before = serialize();
-      panelList.insertBefore(makePanel({
+      panelList.appendChild(makePanel({
         id: uid(),
-        title: nextPanelTitle(),
+        kind: 'tasks',
+        title: nextPanelTitle('面板'),
         tasks: [],
-      }), addPanelBtn);
+      }));
+      layoutPanels();
       persist();
       pushUndo(before);
     });
 
-    function nextPanelTitle() {
+    addNotePanelBtn.addEventListener('click', () => {
+      const before = serialize();
+      const panel = makePanel({
+        id: uid(),
+        kind: 'note',
+        title: nextPanelTitle('便签'),
+        note: '',
+      });
+      panelList.appendChild(panel);
+      layoutPanels();
+      persist();
+      pushUndo(before);
+      panel.querySelector('.panel-title').click();
+    });
+
+    function nextPanelTitle(prefix) {
       let max = 0;
       for (const el of panelList.querySelectorAll('.panel-title')) {
-        const match = /^面板 (\d+)$/.exec(el.textContent);
+        const match = new RegExp('^' + prefix + ' (\\d+)$').exec(el.textContent);
         if (match) max = Math.max(max, Number(match[1]));
       }
-      return '面板 ' + (max + 1);
+      return prefix + ' ' + (max + 1);
     }
 
     // ---------- 拖拽排序（任务同级 / 面板同级） ----------
@@ -1128,7 +1304,7 @@
       }
 
       if (dragKind === 'panel') {
-        const targetPanel = e.target.closest('.panel');
+        const targetPanel = nearestPanel(e.clientX, e.clientY);
         if (!targetPanel || targetPanel === dragPanelEl) {
           pendingPanelDrop = null;
           hideDropLine();
@@ -1137,7 +1313,7 @@
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
         const rect = targetPanel.getBoundingClientRect();
-        const after = e.clientY > rect.top + rect.height / 2;
+        const after = e.clientX > rect.left + rect.width / 2;
         pendingPanelDrop = { target: targetPanel, after };
         showPanelLine(targetPanel, after);
       }
@@ -1163,6 +1339,7 @@
       } else if (dragKind === 'panel' && pendingPanelDrop) {
         const { target, after } = pendingPanelDrop;
         panelList.insertBefore(dragPanelEl, after ? target.nextSibling : target);
+        layoutPanels();
       }
     });
 
@@ -1220,11 +1397,29 @@
     function showPanelLine(target, after) {
       const rect = target.getBoundingClientRect();
       dropLine.className = 'drop-line';
-      dropLine.style.left = (rect.left + 4) + 'px';
-      dropLine.style.top = (after ? rect.bottom - 2 : rect.top - 2) + 'px';
-      dropLine.style.width = Math.max(rect.width - 8, 40) + 'px';
-      dropLine.style.height = '';
+      dropLine.style.left = (after ? rect.right + 6 : rect.left - 8) + 'px';
+      dropLine.style.top = rect.top + 'px';
+      dropLine.style.width = '2px';
+      dropLine.style.height = rect.height + 'px';
       dropLine.hidden = false;
+    }
+
+    // 面板是绝对定位的瀑布流，命中判断按几何距离，不依赖 DOM 层叠
+    function nearestPanel(x, y) {
+      let best = null;
+      let bestDist = Infinity;
+      for (const el of panelList.querySelectorAll(':scope > .panel')) {
+        if (el === dragPanelEl) continue;
+        const rect = el.getBoundingClientRect();
+        const dx = Math.max(rect.left - x, 0, x - rect.right);
+        const dy = Math.max(rect.top - y, 0, y - rect.bottom);
+        const dist = dx * dx + dy * dy;
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = el;
+        }
+      }
+      return best;
     }
 
     function hideDropLine() {
@@ -1256,7 +1451,13 @@
 
       for (const panel of panels) {
         lines.push('## ' + panel.title, '');
-        walk(panel.tasks || [], 0);
+        if (panel.kind === 'note') {
+          for (const line of String(panel.note || '').split('\n')) {
+            lines.push('> ' + line);
+          }
+        } else {
+          walk(panel.tasks || [], 0);
+        }
         lines.push('');
       }
 
@@ -1275,6 +1476,7 @@
           fallbackSeq += 1;
           currentPanel = {
             id: uid(),
+            kind: 'tasks',
             title: fallbackSeq === 1 ? '导入' : '导入 ' + fallbackSeq,
             tasks: [],
           };
@@ -1286,7 +1488,7 @@
       for (const raw of text.split(/\r?\n/)) {
         const heading = /^\s*#{2,6}\s+(.+?)\s*$/.exec(raw);
         if (heading) {
-          currentPanel = { id: uid(), title: heading[1], tasks: [] };
+          currentPanel = { id: uid(), kind: 'tasks', title: heading[1], tasks: [] };
           panels.push(currentPanel);
           stack.length = 0;
           currentTask = null;
@@ -1328,6 +1530,10 @@
           currentTask.content = currentTask.content
             ? currentTask.content + '\n' + quote[1]
             : quote[1];
+        } else if (quote && currentPanel) {
+          currentPanel.note = currentPanel.note
+            ? currentPanel.note + '\n' + quote[1]
+            : quote[1];
         }
       }
 
@@ -1335,7 +1541,18 @@
         task.content = task.content.trim();
         task.children.forEach(trimTask);
       };
-      for (const panel of panels) panel.tasks.forEach(trimTask);
+      for (const panel of panels) {
+        panel.tasks.forEach(trimTask);
+        if (panel.note !== undefined) {
+          panel.note = panel.note.trim();
+          if (!panel.tasks.length) {
+            panel.kind = 'note';
+            continue;
+          }
+          panel.note = undefined;
+        }
+        panel.kind = 'tasks';
+      }
 
       return panels;
     }
@@ -1356,7 +1573,7 @@
       }
 
       const panels = parseMarkdown(text);
-      if (!panels.some((panel) => panel.tasks.length)) {
+      if (!panels.some((panel) => panel.tasks.length || panel.kind === 'note')) {
         alert('文件中没有找到可导入的任务');
         return;
       }
@@ -1410,6 +1627,10 @@
     renderPanels(loadPanels());
     persist();
     updateUndoBtn();
+
+    window.addEventListener('resize', scheduleLayout);
+    // 字体加载完成后行高可能变化，重排一次
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(scheduleLayout);
   </script>
 </body>
 </html>
